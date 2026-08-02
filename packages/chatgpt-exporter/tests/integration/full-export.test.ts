@@ -67,6 +67,7 @@ describe("deterministic full-scope export integration", () => {
       partialAssetReferenceCount: 0,
     });
     const authoritativeBefore = await authoritativeHash(filesystem);
+    expect(authoritativeBefore).toBe("cb65e475fbd9521efc1e69d546916a04845799b5268c60a98d701fe1b48c3360");
 
     const repeatTransport = fullTransport();
     const repeat = await new ChatGptCaptureEngine({

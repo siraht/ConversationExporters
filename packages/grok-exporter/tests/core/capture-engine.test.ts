@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CaptureEngine } from "../../src/core/capture-engine";
 import { MemoryArchiveFileSystem } from "../../src/core/filesystem";
+import { sha256Hex } from "../../src/core/hash";
 import { parseJson } from "../../src/core/serialization";
 import { DEFAULT_CAPTURE_SETTINGS, type RunJournal } from "../../src/core/types";
 import { GrokClient } from "../../src/grok/client";
@@ -42,6 +43,7 @@ describe("capture engine", () => {
     });
 
     const summary = await engine.run();
+    expect(await authoritativeHash(filesystem)).toBe("a208766de08e1c77e58b29614f7b0204e7d13ee7179ec3c426ad4f5e259b4d86");
     expect(summary).toMatchObject({ complete: true, inventoryCount: 2, completeCount: 2, failedCount: 0 });
     expect(filesystem.paths()).toContain("conversations/c1/source/response-nodes.json");
     expect(filesystem.paths()).toContain("conversations/c1/conversation.md");
@@ -97,3 +99,10 @@ describe("capture engine", () => {
     expect(journal?.conversations.c1?.state).toBe("terminal_failure");
   });
 });
+
+async function authoritativeHash(filesystem: MemoryArchiveFileSystem): Promise<string> {
+  const paths = filesystem.paths().filter((path) => path.startsWith("conversations/") || path.startsWith("indexes/") || path.startsWith("source/"));
+  const rows: string[] = [];
+  for (const path of paths) rows.push(`${path}\0${await sha256Hex((await filesystem.readBytes(path))!)}`);
+  return sha256Hex(rows.sort().join("\n"));
+}
