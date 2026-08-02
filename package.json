@@ -13,10 +13,13 @@
     "check:shared": "npm --workspace @conversation-exporters/shared run check",
     "check:grok": "npm --workspace grok-exporter run check",
     "check:chatgpt": "npm --workspace chatgpt-exporter run check",
+    "test:e2e": "npm run test:e2e:grok && npm run test:e2e:chatgpt",
+    "test:e2e:grok": "npm --workspace grok-exporter run test:e2e",
+    "test:e2e:chatgpt": "npm --workspace chatgpt-exporter run test:e2e",
     "package": "npm run package:grok && npm run package:chatgpt",
     "package:grok": "npm --workspace grok-exporter run package",
     "package:chatgpt": "npm --workspace chatgpt-exporter run package",
-    "privacy:check": "node scripts/privacy-check.mjs"
+    "privacy:check": "node scripts/privacy-check.mjs",
+    "release:verify": "node scripts/verify-releases.mjs"
   }
 }
-
