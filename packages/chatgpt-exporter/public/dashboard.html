@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ChatGPTExporter</title>
+    <link rel="stylesheet" href="dashboard.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <p class="eyebrow">LOCAL ARCHIVE UTILITY</p>
+          <h1>ChatGPTExporter</h1>
+          <p class="intro">A privacy-first, resumable ChatGPT archive. Authentication stays inside your normal signed-in ChatGPT tab; exports stay in the directory you choose.</p>
+        </div>
+        <span class="privacy">LOCAL ONLY</span>
+      </header>
+
+      <section class="panel">
+        <div class="section-heading">
+          <div>
+            <h2>1. Find ChatGPT and workspaces</h2>
+            <p>Keep a signed-in <code>chatgpt.com</code> tab open. Credentials must remain inside that page.</p>
+          </div>
+          <div class="actions">
+            <button id="open-chatgpt" class="secondary" type="button">Open ChatGPT</button>
+            <button id="find-chatgpt" type="button">Find tab</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel workspace-panel">
+        <div>
+          <h2>2. Select workspaces</h2>
+          <p>Personal and managed workspaces have separate histories. Each selected workspace is exported and verified independently.</p>
+        </div>
+        <div class="workspace-controls">
+          <label for="workspace-select">Accessible workspace</label>
+          <select id="workspace-select" multiple size="4" disabled>
+            <option value="">Find ChatGPT first</option>
+          </select>
+          <button id="preflight-workspace" type="button" disabled>Verify selected workspaces</button>
+        </div>
+      </section>
+
+      <section class="panel destination">
+        <div>
+          <h2>3. Choose archive directory</h2>
+          <p id="directory-label">Verify selected workspaces first</p>
+        </div>
+        <button id="choose-directory" type="button" disabled>Choose parent directory</button>
+      </section>
+
+      <section class="panel inventory-panel">
+        <div>
+          <h2>4. Build complete inventory</h2>
+          <p>Raw listing pages are saved before any conversation bodies are downloaded. Hitting a safety limit stops with an incomplete state.</p>
+        </div>
+        <fieldset>
+          <legend>Required scopes</legend>
+          <label><input id="scope-main" type="checkbox" checked disabled> Main history</label>
+          <label><input id="scope-archived" type="checkbox" checked> Archived</label>
+          <label><input id="scope-projects" type="checkbox" checked> Projects</label>
+          <label><input id="scope-shared" type="checkbox" checked> Shared</label>
+          <label><input id="scope-account" type="checkbox" checked> Account artifacts</label>
+          <label><input id="scope-assets" type="checkbox" checked> Assets</label>
+        </fieldset>
+        <button id="run-inventory" type="button" disabled>Build inventory</button>
+      </section>
+
+      <section class="panel confirmation-panel">
+        <div>
+          <h2>5. Confirm inventory</h2>
+          <p id="inventory-summary">Build an inventory first. Capture stays locked until you confirm its aggregate counts and scope termination.</p>
+        </div>
+        <button id="confirm-inventory" type="button" disabled>Confirm inventory</button>
+      </section>
+
+      <section class="panel capture-panel">
+        <div>
+          <h2>6. Capture, resume, and verify</h2>
+          <p>Batch responses are reconciled against inventory, suspicious records fall back to single detail, and every raw revision is hashed before normalized output is published.</p>
+        </div>
+        <div class="capture-actions">
+          <button id="run-capture" type="button" disabled>Start / resume capture</button>
+          <button id="revalidate" class="secondary" type="button" disabled>Revalidate only</button>
+        </div>
+      </section>
+
+      <section class="panel controls-panel">
+        <div>
+          <h2>Request controls</h2>
+          <p>Pause and cancel take effect before the next provider request. Completed files and journals remain resumable.</p>
+        </div>
+        <label>Delay (ms)<input id="request-delay" type="number" min="0" max="60000" step="50" value="250"></label>
+        <label>Concurrency<input id="request-concurrency" type="number" min="1" max="8" step="1" value="1"></label>
+        <label>Batch size<input id="batch-size" type="number" min="1" max="10" step="1" value="10"></label>
+        <div class="actions">
+          <button id="pause-run" class="secondary" type="button" disabled>Pause</button>
+          <button id="resume-run" class="secondary" type="button" disabled>Resume</button>
+          <button id="cancel-run" class="danger" type="button" disabled>Cancel</button>
+        </div>
+      </section>
+
+      <section class="panel run-panel">
+        <p id="status" data-state="idle">Open a signed-in ChatGPT tab to begin preflight.</p>
+        <div id="log" aria-live="polite"></div>
+      </section>
+
+      <footer>ChatGPTExporter sends no telemetry and has no backend. Access tokens remain in the ChatGPT page and are never stored, logged, or shown here.</footer>
+    </main>
+    <script src="dashboard.js"></script>
+  </body>
+</html>
