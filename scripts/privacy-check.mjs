@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 
 const files = execFileSync("git", ["ls-files", "-co", "--exclude-standard"], { encoding: "utf8" })
   .split("\n")
-  .filter(Boolean);
+  .filter((file) => file && !file.startsWith("packages/grok-exporter/") && !file.startsWith("packages/chatgpt-exporter/"));
 const forbiddenPaths = /(^|\/)(private|exports?|browser-profiles?|user data)(\/|$)|\.(har|zip|crx|pem|sqlite3?|db)$/i;
 const forbiddenContent = [
   /\b(authorization|x-authorization|cookie|set-cookie)\s*:/i,
@@ -30,5 +30,7 @@ if (findings.length > 0) {
   console.error(findings.join("\n"));
   process.exit(1);
 }
+for (const workspace of ["grok-exporter", "chatgpt-exporter"]) {
+  execFileSync("npm", ["--workspace", workspace, "run", "privacy:check"], { stdio: "inherit" });
+}
 console.log(`Privacy check passed for ${files.length} tracked/unignored files.`);
-

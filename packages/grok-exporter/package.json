@@ -17,6 +17,9 @@
   "engines": {
     "node": ">=20"
   },
+  "dependencies": {
+    "@conversation-exporters/shared": "0.1.0"
+  },
   "devDependencies": {
     "@types/chrome": "^0.1.0",
     "@types/node": "^24.0.0",
