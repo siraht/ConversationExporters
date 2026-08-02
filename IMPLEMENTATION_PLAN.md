@@ -1,6 +1,6 @@
 # ConversationExporters consolidation plan
 
-Status: release candidate; repaired remote CI rerun pending
+Status: complete
 
 Goal: consolidate the accepted GrokExporter and ChatGPTExporter implementations into one maintainable source tree while preserving complete private archives, provider-specific web semantics, least-privilege manifests, deterministic output, and independent releases.
 
@@ -17,7 +17,7 @@ The complete standalone research, implementation history, decisions, and accepta
 - [x] Produce separate Grok-only and ChatGPT-only manifests and reproducible ZIP releases with no host-permission expansion.
 - [x] Revalidate both private archives from the consolidated tree using aggregate-only evidence.
 - [x] Add root privacy scanning, provenance, upgrade instructions, CI, packaged Chromium tests, and deterministic release verification.
-- [ ] Run the final clean-checkout gate, publish the public repository, tag `v0.1.0`, and confirm the remote refs.
+- [x] Run the final clean-checkout gate, publish the public repository, tag `v0.1.0`, and confirm the remote refs.
 
 ## Evidence
 
@@ -61,3 +61,4 @@ The complete standalone research, implementation history, decisions, and accepta
 - A detached clean worktree passed fresh `npm ci`, all 126 tests, both TypeScript/build/privacy gates, both packaged Chromium tests, and reproducible independent release packaging.
 - Published the public `siraht/ConversationExporters` repository and confirmed its `main` ref. The tag-triggered CI passed, but its simultaneous branch run exposed a wall-clock race in the packaged ChatGPT pause test: the synthetic response could complete before the click arrived on a loaded runner.
 - Replaced the 75 ms timing assumption with an explicit fixture response gate that holds the active request until the dashboard is observably paused. Five consecutive packaged runs pass locally; the final checkbox remains open until the repaired commit passes remote CI and receives the release tag.
+- The repaired commit passed a second detached clean-worktree gate and the complete main-branch GitHub Actions workflow. The final documentation commit receives the annotated `v0.1.0` tag; matching remote branch/tag refs and successful workflows close Phase CG-G.
