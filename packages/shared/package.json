@@ -4,10 +4,13 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./dashboard": "./src/dashboard.ts",
+    "./extension-runtime": "./src/extension-runtime.ts",
     "./filesystem": "./src/filesystem.ts",
     "./handle-store": "./src/handle-store.ts",
     "./hash": "./src/hash.ts",
     "./json": "./src/json.ts",
+    "./page-relay": "./src/page-relay.ts",
     "./paths": "./src/paths.ts",
     "./serialization": "./src/serialization.ts",
     "./types": "./src/types.ts"
@@ -18,10 +21,10 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@types/chrome": "^0.1.0",
     "@types/node": "^24.0.0",
     "typescript": "^5.8.0",
     "vitest": "^3.2.0"
   },
   "license": "MIT"
 }
-

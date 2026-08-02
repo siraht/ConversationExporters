@@ -6,6 +6,7 @@ import { auditArchive, type ArchiveAuditReport } from "../chatgpt/audit";
 import { ControlledTransport } from "../core/request-control";
 import { ensureDirectoryPermission, loadDirectoryHandle, saveDirectoryHandle } from "./handle-store";
 import { BridgeResponseError, RuntimeApiTransport, type FindTabResult } from "./protocol";
+import { dashboardErrorMessage, requiredElement as element, setDashboardStatus, strictInteger } from "@conversation-exporters/shared/dashboard";
 
 const chooseButton = element<HTMLButtonElement>("choose-directory");
 const openButton = element<HTMLButtonElement>("open-chatgpt");
@@ -380,9 +381,7 @@ function setRunControls(running: boolean): void {
 }
 
 function integerValue(input: HTMLInputElement, minimum: number, maximum: number): number {
-  const value = Number(input.value);
-  if (!Number.isInteger(value) || value < minimum || value > maximum) throw new Error(`${input.id} must be ${minimum}-${maximum}.`);
-  return value;
+  return strictInteger(input, minimum, maximum);
 }
 
 function combineAuditState(reports: ArchiveAuditReport[]): "complete" | "conversations complete / assets partial" | "incomplete" {
@@ -411,8 +410,7 @@ function setBusy(button: HTMLButtonElement, busy: boolean): void {
 }
 
 function setStatus(message: string, state: string): void {
-  status.textContent = message;
-  status.dataset.state = state;
+  setDashboardStatus(status, message, state);
 }
 
 function showError(error: unknown): void {
@@ -420,11 +418,5 @@ function showError(error: unknown): void {
     setStatus("Authentication required. Sign in or refresh the normal ChatGPT tab, then find and verify it again; completed local work is preserved.", "error");
     return;
   }
-  setStatus(error instanceof Error ? error.message : String(error), "error");
-}
-
-function element<T extends HTMLElement>(id: string): T {
-  const value = document.getElementById(id);
-  if (!value) throw new Error(`Missing dashboard element: ${id}`);
-  return value as T;
+  setStatus(dashboardErrorMessage(error), "error");
 }

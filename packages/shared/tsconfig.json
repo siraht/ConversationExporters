@@ -9,8 +9,7 @@
     "exactOptionalPropertyTypes": true,
     "useUnknownInCatchVariables": true,
     "noEmit": true,
-    "types": ["node", "vitest/globals"]
+    "types": ["node", "chrome", "vitest/globals"]
   },
   "include": ["src", "tests"]
 }
-

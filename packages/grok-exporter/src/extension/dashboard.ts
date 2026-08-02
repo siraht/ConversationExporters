@@ -7,6 +7,7 @@ import { GrokClient } from "../grok/client";
 import { ensureDirectoryPermission, loadDirectoryHandle, saveDirectoryHandle } from "./handle-store";
 import type { FindTabResult } from "./protocol";
 import { RuntimeApiTransport } from "./protocol";
+import { boundedInteger, dashboardErrorMessage, requiredElement as element, setDashboardStatus } from "@conversation-exporters/shared/dashboard";
 
 const chooseButton = element<HTMLButtonElement>("choose-directory");
 const openGrokButton = element<HTMLButtonElement>("open-grok");
@@ -149,22 +150,13 @@ function setRunningUi(value: boolean): void {
 }
 
 function setStatus(message: string, state: string): void {
-  status.textContent = message;
-  status.dataset.state = state;
+  setDashboardStatus(status, message, state);
 }
 
 function showError(error: unknown): void {
-  const message = error instanceof Error ? error.message : String(error);
-  setStatus(message, "error");
+  setStatus(dashboardErrorMessage(error), "error");
 }
 
 function numberInput(id: string, minimum: number, maximum: number): number {
-  const value = Number(element<HTMLInputElement>(id).value);
-  return Number.isFinite(value) ? Math.min(maximum, Math.max(minimum, Math.round(value))) : minimum;
-}
-
-function element<T extends HTMLElement>(id: string): T {
-  const value = document.getElementById(id);
-  if (!value) throw new Error(`Missing dashboard element: ${id}`);
-  return value as T;
+  return boundedInteger(element<HTMLInputElement>(id), minimum, maximum);
 }

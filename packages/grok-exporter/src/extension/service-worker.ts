@@ -1,15 +1,14 @@
 import type { ApiResponse } from "../core/types";
 import { BRIDGE_PROTOCOL_VERSION } from "../core/types";
+import { findProviderTab, installDashboardAction, isTrustedExtensionSender, sendPageRequest } from "@conversation-exporters/shared/extension-runtime";
 import { isAllowedGrokApiRequest } from "../grok/endpoints";
 import type { DashboardRuntimeRequest, FindTabResult, RuntimeApiRequest } from "./protocol";
 import { isApiRequest } from "./protocol";
 
-chrome.action.onClicked.addListener(() => {
-  void chrome.tabs.create({ url: chrome.runtime.getURL("dashboard.html") });
-});
+installDashboardAction();
 
 chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
-  if (sender.id !== chrome.runtime.id || !sender.url?.startsWith(chrome.runtime.getURL(""))) return false;
+  if (!isTrustedExtensionSender(sender)) return false;
   const request = message as DashboardRuntimeRequest;
   if (request.type === "GROK_EXPORTER_FIND_TAB") {
     void findGrokTab().then(sendResponse);
@@ -23,10 +22,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
 });
 
 async function findGrokTab(): Promise<FindTabResult> {
-  const tabs = await chrome.tabs.query({ url: ["https://grok.com/*"] });
-  const tab = tabs.find((candidate) => candidate.active) ?? tabs[0];
-  if (tab?.id === undefined) return { ok: false, error: "Open and sign in to grok.com, then try again." };
-  return { ok: true, tabId: tab.id, ...(tab.title === undefined ? {} : { title: tab.title }) };
+  return await findProviderTab(["https://grok.com/*"], "Open and sign in to grok.com, then try again.");
 }
 
 async function forwardApiRequest(message: RuntimeApiRequest): Promise<ApiResponse> {
@@ -39,10 +35,7 @@ async function forwardApiRequest(message: RuntimeApiRequest): Promise<ApiRespons
     };
   }
   try {
-    return await chrome.tabs.sendMessage(message.tabId, {
-      type: "GROK_EXPORTER_PAGE_REQUEST",
-      request: message.request,
-    }) as ApiResponse;
+    return await sendPageRequest<ApiResponse>(message.tabId, "GROK_EXPORTER_PAGE_REQUEST", message.request);
   } catch {
     return {
       requestId: message.request.requestId,
@@ -57,4 +50,3 @@ async function forwardApiRequest(message: RuntimeApiRequest): Promise<ApiRespons
     };
   }
 }
-
