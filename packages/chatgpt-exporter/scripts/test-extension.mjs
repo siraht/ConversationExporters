@@ -15,6 +15,10 @@ const certificatePath = path.join(temporaryRoot, "certificate.pem");
 const keyPath = path.join(temporaryRoot, "key.pem");
 let conversationListingRequests = 0;
 let batchRequests = 0;
+let holdNextInventoryResponse = false;
+let releaseHeldInventoryResponse;
+let holdNextBatchResponse = false;
+let releaseHeldBatchResponse;
 execFileSync("openssl", [
   "req", "-x509", "-newkey", "rsa:2048", "-nodes",
   "-keyout", keyPath,
@@ -71,7 +75,13 @@ const server = https.createServer({
     }
     const authorized = request.headers.authorization === "Bearer synthetic-page-local-secret"
       && request.headers["x-authorization"] === "Bearer synthetic-page-local-secret";
-    setTimeout(() => {
+    const gate = holdNextInventoryResponse
+      ? new Promise((resolve) => {
+        holdNextInventoryResponse = false;
+        releaseHeldInventoryResponse = resolve;
+      })
+      : Promise.resolve();
+    void gate.then(() => setTimeout(() => {
       response.writeHead(authorized ? 200 : 401, { "Content-Type": "application/json" });
       response.end(JSON.stringify(authorized ? {
         items: [
@@ -82,7 +92,7 @@ const server = https.createServer({
         offset: Number(requestUrl.searchParams.get("offset") ?? 0),
         limit: Number(requestUrl.searchParams.get("limit") ?? 100),
       } : { error: "fixture rejected request" }));
-    }, 75);
+    }, 75));
     return;
   }
   if (requestUrl.pathname === "/backend-api/conversations/batch") {
@@ -91,10 +101,16 @@ const server = https.createServer({
     request.on("data", (chunk) => { body += chunk; });
     request.on("end", () => {
       const ids = JSON.parse(body).conversation_ids;
-      setTimeout(() => {
+      const gate = holdNextBatchResponse
+        ? new Promise((resolve) => {
+          holdNextBatchResponse = false;
+          releaseHeldBatchResponse = resolve;
+        })
+        : Promise.resolve();
+      void gate.then(() => setTimeout(() => {
         response.writeHead(200, { "Content-Type": "application/json" });
         response.end(JSON.stringify(ids.map(syntheticConversation)));
-      }, 75);
+      }, 75));
     });
     return;
   }
@@ -315,11 +331,14 @@ try {
   await dashboard.locator("#scope-shared").uncheck();
   await dashboard.locator("#request-delay").fill("100");
   const listingRequestsBeforeInventory = conversationListingRequests;
+  holdNextInventoryResponse = true;
   await dashboard.locator("#run-inventory").click();
+  await waitFor(() => conversationListingRequests === listingRequestsBeforeInventory + 1, "Inventory request did not start.");
   await dashboard.locator("#pause-run:not([disabled])").click();
   await dashboard.locator('#status[data-state="paused"]').waitFor();
   await new Promise((resolve) => setTimeout(resolve, 250));
   assert(conversationListingRequests === listingRequestsBeforeInventory + 1, "Pause allowed the next inventory request to start.");
+  releaseHeldInventoryResponse?.();
   await dashboard.locator("#resume-run:not([disabled])").click();
   await dashboard.locator("#confirm-inventory:not([disabled])").waitFor();
   assert((await dashboard.locator("#inventory-summary").textContent())?.includes("2 conversations"), "Dashboard inventory summary did not reconcile two conversations.");
@@ -328,11 +347,14 @@ try {
   await dashboard.locator("#scope-account").uncheck();
   await dashboard.locator("#scope-assets").uncheck();
   await dashboard.locator("#batch-size").fill("1");
+  holdNextBatchResponse = true;
   await dashboard.locator("#run-capture").click();
+  await waitFor(() => batchRequests === 1, "Capture request did not start.");
   await dashboard.locator("#pause-run:not([disabled])").click();
   await dashboard.locator('#status[data-state="paused"]').waitFor();
   await new Promise((resolve) => setTimeout(resolve, 250));
   assert(batchRequests === 1, "Pause allowed the next capture batch to start.");
+  releaseHeldBatchResponse?.();
   await dashboard.locator("#resume-run:not([disabled])").click();
   await dashboard.locator('#status[data-state="complete"]').waitFor({ timeout: 15_000 });
   assert((await dashboard.locator("#status").textContent())?.includes("Capture complete"), "Dashboard capture did not reach an audited complete state.");
@@ -351,6 +373,14 @@ try {
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
+}
+
+async function waitFor(predicate, message, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error(message);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
 }
 
 function syntheticConversation(id) {
