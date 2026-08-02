@@ -1,6 +1,6 @@
 # ChatGPTExporter implementation plan
 
-Status: standalone accepted; consolidation active
+Status: standalone exporters accepted; consolidation release candidate
 Started: 2026-08-01
 Goal: export and independently verify every conversation exposed by all accessible ChatGPT web-history scopes without moving authentication secrets outside the authenticated page, then consolidate the proven ChatGPT and Grok implementations behind a shared core with separate least-privilege extension packages.
 
@@ -754,13 +754,13 @@ Agents must update the progress journal, decision log, and lessons after each me
 
 #### Phase CG-G — one shared source tree, separate safe releases
 
-- [ ] Tag/reverify the accepted Grok baseline and ChatGPT standalone baseline.
-- [ ] Create the consolidated repository/package layout without changing provider behavior.
-- [ ] Extract generic core, dashboard, and extension runtime modules with compatibility tests.
-- [ ] Move Grok and ChatGPT logic into provider packages and retain provider-owned pagination/auth semantics.
-- [ ] Produce Grok-only and ChatGPT-only manifests/releases with no permission expansion.
-- [ ] Prove synthetic output equivalence and revalidate both private archives.
-- [ ] Update documentation, attribution, upgrade paths, CI, privacy scanning, and reproducible release packaging.
+- [x] Tag/reverify the accepted Grok baseline and ChatGPT standalone baseline.
+- [x] Create the consolidated repository/package layout without changing provider behavior.
+- [x] Extract generic core, dashboard, and extension runtime modules with compatibility tests.
+- [x] Move Grok and ChatGPT logic into provider packages and retain provider-owned pagination/auth semantics.
+- [x] Produce Grok-only and ChatGPT-only manifests/releases with no permission expansion.
+- [x] Prove synthetic output equivalence and revalidate both private archives.
+- [x] Update documentation, attribution, upgrade paths, CI, privacy scanning, and reproducible release packaging.
 - [ ] Mark the plan complete only when every checkbox and completion-contract item has evidence.
 
 Suggested Conventional Commit sequence begins with `chore(chatgpt): establish private-data boundary`, then uses narrow `research`, `feat`, `fix`, `test`, `docs`, and `refactor(core)` commits. Every commit must add `Co-Authored-By: OpenAI Codex <codex@openai.com>` when authored by Codex. Never combine personal export artifacts with a source commit.
@@ -925,3 +925,10 @@ The first implementation entry should record the Grok baseline, sibling reposito
 
 - The aggregate-only acceptance record and complete `0.1.6` source are tagged `v0.1.6`; Phase CG-F is complete. No private archive path, account identifier, conversation identifier, title, body, asset name, credential, signed URL, or browser state is present in the tag.
 - Next: reverify and tag the accepted Grok baseline, then create the consolidated source tree and port both accepted provider implementations behind compatibility evidence.
+
+### 2026-08-02 — consolidated release candidate accepted
+
+- Imported both accepted tags into `/home/travis/Projects/ConversationExporters`, retained provider-owned authentication/pagination/envelope/asset logic, and extracted only proven common core, filesystem, dashboard, relay, and service-worker behavior. A typed provider capability contract keeps each provider's account, scope, cursor, raw-envelope, normalized, asset, and validation evidence opaque.
+- Pinned authoritative synthetic archive hashes from both standalone tags; the consolidated outputs match. Shared tests, 31 Grok tests, 84 ChatGPT tests, both packaged Chromium extensions, privacy scanning, byte-identical accepted manifests, and two consecutive byte-identical release ZIPs pass.
+- Consolidated private revalidation reconciles all 946 Grok conversations and 107/107 complete Grok assets with zero findings, while all 14 available ChatGPT live-UI categories pass aggregate-only sampling. No private path, identifier, title, content, asset name, credential, signed URL, or browser state is committed.
+- Added root CI, privacy enforcement, provenance, upgrade instructions, deterministic release verification, and the authoritative consolidation checklist. Next: run the clean-checkout gate, publish the repository, tag `v0.1.0`, verify remote refs, and close the final completion checkbox.
