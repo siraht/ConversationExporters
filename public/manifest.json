@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "ChatGPTExporter",
+  "version": "0.1.6",
+  "description": "Complete, resumable, privacy-first local exports of your ChatGPT conversation history.",
+  "permissions": [],
+  "host_permissions": ["https://chatgpt.com/*"],
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "action": {
+    "default_title": "Open ChatGPTExporter"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://chatgpt.com/*"],
+      "js": ["page-bridge.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://chatgpt.com/*"],
+      "js": ["content-relay.js"],
+      "run_at": "document_start"
+    }
+  ]
+}
