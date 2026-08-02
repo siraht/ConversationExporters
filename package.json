@@ -1,0 +1,22 @@
+{
+  "name": "conversation-exporters",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build:grok && npm run build:chatgpt",
+    "build:grok": "npm --workspace grok-exporter run build",
+    "build:chatgpt": "npm --workspace chatgpt-exporter run build",
+    "check": "npm run check:shared && npm run check:grok && npm run check:chatgpt && npm run privacy:check",
+    "check:shared": "npm --workspace @conversation-exporters/shared run check",
+    "check:grok": "npm --workspace grok-exporter run check",
+    "check:chatgpt": "npm --workspace chatgpt-exporter run check",
+    "package": "npm run package:grok && npm run package:chatgpt",
+    "package:grok": "npm --workspace grok-exporter run package",
+    "package:chatgpt": "npm --workspace chatgpt-exporter run package",
+    "privacy:check": "node scripts/privacy-check.mjs"
+  }
+}
+

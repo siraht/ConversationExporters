@@ -1,0 +1,17 @@
+node_modules/
+dist/
+coverage/
+.DS_Store
+*.log
+*.zip
+*.crx
+*.pem
+*.har
+*.sqlite*
+*.db
+.env*
+private/
+exports/
+browser-profiles/
+research/repos/
+
