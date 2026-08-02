@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>GrokExporter</title>
+    <link rel="stylesheet" href="dashboard.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <p class="eyebrow">LOCAL ARCHIVE UTILITY</p>
+          <h1>GrokExporter</h1>
+          <p class="intro">Archive every accessible Grok conversation as raw JSON, normalized JSON, Markdown, and validated indexes. Authentication stays in your existing Grok tab.</p>
+        </div>
+        <span class="privacy">LOCAL ONLY</span>
+      </header>
+
+      <section class="panel destination">
+        <div>
+          <h2>1. Choose archive directory</h2>
+          <p id="directory-label">No directory selected</p>
+        </div>
+        <button id="choose-directory" type="button">Choose directory</button>
+      </section>
+
+      <section class="panel">
+        <div class="section-heading">
+          <div>
+            <h2>2. Connect Grok</h2>
+            <p>Keep a signed-in <code>grok.com</code> tab open. Cookies and tokens never cross into the extension.</p>
+          </div>
+          <button id="open-grok" class="secondary" type="button">Open Grok</button>
+        </div>
+      </section>
+
+      <section class="panel settings">
+        <h2>3. Export settings</h2>
+        <div class="setting-grid">
+          <label>Request delay <span><input id="request-delay" type="number" min="100" max="10000" value="500"> ms</span></label>
+          <label>Response batch size <input id="batch-size" type="number" min="1" max="100" value="50"></label>
+          <label class="check"><input id="include-assets" type="checkbox" checked> Download referenced assets</label>
+          <label class="check"><input id="include-workspaces" type="checkbox" checked> Capture workspace/project metadata</label>
+        </div>
+      </section>
+
+      <section class="panel run-panel">
+        <div class="actions">
+          <button id="start-export" type="button" disabled>Start or resume export</button>
+          <button id="pause-export" class="secondary" type="button" disabled>Pause</button>
+          <button id="cancel-export" class="danger" type="button" disabled>Cancel</button>
+        </div>
+        <p id="status" data-state="idle">Ready when a directory and Grok tab are available.</p>
+        <progress id="progress" max="1" value="0"></progress>
+        <div id="log" aria-live="polite"></div>
+      </section>
+
+      <footer>GrokExporter sends no telemetry and has no backend. Review <code>reports/validation.md</code> after every run.</footer>
+    </main>
+    <script src="dashboard.js"></script>
+  </body>
+</html>
+

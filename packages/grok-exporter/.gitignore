@@ -1,0 +1,33 @@
+# Dependencies and build output
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+*.log
+
+# Local research checkouts (upstream repositories retain their own history)
+research/repos/
+
+# Personal exports, browser state, and captured network traffic
+captures/
+exports/
+private/
+browser-profile/
+*.har
+*.zip
+*.crx
+
+# Credentials and machine-local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+
+# Editor and OS noise
+.DS_Store
+.idea/
+.vscode/
+
