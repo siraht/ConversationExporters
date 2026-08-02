@@ -1,5 +1,6 @@
 // Runtime shape adapted from GrokExporter commit 85922d6; requests are operation descriptors, never URLs or headers.
 import { validateOperation } from "../chatgpt/endpoints";
+import { CHATGPT_PROVIDER } from "../chatgpt/provider";
 import { findProviderTab, installDashboardAction, isTrustedExtensionSender, sendPageRequest } from "@conversation-exporters/shared/extension-runtime";
 import { failureResponse, type ApiRequest, type ApiResponse, type FindTabResult, parseApiRequest, requestId } from "./protocol";
 
@@ -20,7 +21,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
 });
 
 async function findChatGptTab(): Promise<FindTabResult> {
-  return await findProviderTab(["https://chatgpt.com/*"], "Open and sign in to chatgpt.com, then try again.");
+  return await findProviderTab([`${CHATGPT_PROVIDER.primaryOrigin}/*`], "Open and sign in to chatgpt.com, then try again.");
 }
 
 async function forwardApiRequest(tabId: unknown, value: unknown): Promise<ApiResponse> {

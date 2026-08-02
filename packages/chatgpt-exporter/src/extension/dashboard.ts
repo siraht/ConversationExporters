@@ -1,4 +1,5 @@
 import { ChatGptClient, type DiscoveredWorkspace } from "../chatgpt/client";
+import { CHATGPT_PROVIDER } from "../chatgpt/provider";
 import { DirectoryArchiveFileSystem } from "../core/filesystem";
 import { DEFAULT_INVENTORY_SETTINGS, runWorkspaceInventories } from "../chatgpt/inventory";
 import { ChatGptCaptureEngine } from "../chatgpt/capture-engine";
@@ -42,7 +43,7 @@ let inventoryConfirmed = false;
 let activeController: ControlledTransport | undefined;
 
 chooseButton.addEventListener("click", () => void chooseDirectory());
-openButton.addEventListener("click", () => void chrome.tabs.create({ url: "https://chatgpt.com/" }));
+openButton.addEventListener("click", () => void chrome.tabs.create({ url: `${CHATGPT_PROVIDER.primaryOrigin}/` }));
 findButton.addEventListener("click", () => void findTabAndWorkspaces());
 preflightButton.addEventListener("click", () => void preflightWorkspace());
 inventoryButton.addEventListener("click", () => void runInventory());

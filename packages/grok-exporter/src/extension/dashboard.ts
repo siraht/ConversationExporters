@@ -4,6 +4,7 @@ import { RunControl } from "../core/control";
 import { DirectoryArchiveFileSystem } from "../core/filesystem";
 import { DEFAULT_CAPTURE_SETTINGS, type CaptureSettings, type ProgressEvent } from "../core/types";
 import { GrokClient } from "../grok/client";
+import { GROK_PROVIDER } from "../grok/provider";
 import { ensureDirectoryPermission, loadDirectoryHandle, saveDirectoryHandle } from "./handle-store";
 import type { FindTabResult } from "./protocol";
 import { RuntimeApiTransport } from "./protocol";
@@ -23,7 +24,7 @@ let runControl: RunControl | undefined;
 let running = false;
 
 chooseButton.addEventListener("click", () => void chooseDirectory());
-openGrokButton.addEventListener("click", () => void chrome.tabs.create({ url: "https://grok.com/" }));
+openGrokButton.addEventListener("click", () => void chrome.tabs.create({ url: `${GROK_PROVIDER.primaryOrigin}/` }));
 startButton.addEventListener("click", () => void startExport());
 pauseButton.addEventListener("click", togglePause);
 cancelButton.addEventListener("click", () => runControl?.cancel());

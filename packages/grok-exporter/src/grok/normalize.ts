@@ -14,6 +14,7 @@ import type {
 import { NORMALIZED_SCHEMA_VERSION } from "../core/types";
 import { capturedResponses } from "./client";
 import { normalizeListEntry, responseIdFromValue, responseNodesFromEnvelope } from "./envelopes";
+import { GROK_PROVIDER } from "./provider";
 
 export interface NormalizeResult {
   conversation: NormalizedConversation;
@@ -86,7 +87,7 @@ export async function normalizeConversation(capture: RawConversationCapture): Pr
     provider: "grok",
     id: listing.id,
     title,
-    sourceUrl: `https://grok.com/c/${encodeURIComponent(listing.id)}`,
+    sourceUrl: GROK_PROVIDER.conversationUrl(listing.id),
     capturedAt: capture.capturedAt,
     workspaceIds: [...new Set([
       ...listing.workspaceIds,

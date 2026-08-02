@@ -2,6 +2,7 @@ import type { ApiResponse } from "../core/types";
 import { BRIDGE_PROTOCOL_VERSION } from "../core/types";
 import { findProviderTab, installDashboardAction, isTrustedExtensionSender, sendPageRequest } from "@conversation-exporters/shared/extension-runtime";
 import { isAllowedGrokApiRequest } from "../grok/endpoints";
+import { GROK_PROVIDER } from "../grok/provider";
 import type { DashboardRuntimeRequest, FindTabResult, RuntimeApiRequest } from "./protocol";
 import { isApiRequest } from "./protocol";
 
@@ -22,7 +23,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
 });
 
 async function findGrokTab(): Promise<FindTabResult> {
-  return await findProviderTab(["https://grok.com/*"], "Open and sign in to grok.com, then try again.");
+  return await findProviderTab([`${GROK_PROVIDER.primaryOrigin}/*`], "Open and sign in to grok.com, then try again.");
 }
 
 async function forwardApiRequest(message: RuntimeApiRequest): Promise<ApiResponse> {

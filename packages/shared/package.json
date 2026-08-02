@@ -12,6 +12,7 @@
     "./json": "./src/json.ts",
     "./page-relay": "./src/page-relay.ts",
     "./paths": "./src/paths.ts",
+    "./provider": "./src/provider.ts",
     "./serialization": "./src/serialization.ts",
     "./types": "./src/types.ts"
   },
