@@ -5,6 +5,7 @@
   "description": "A complete, resumable, privacy-first exporter for Grok web conversations.",
   "type": "module",
   "scripts": {
+    "audit:private": "node scripts/audit-private-archive.mjs",
     "build": "node scripts/build.mjs",
     "check": "npm run typecheck && npm test && npm run privacy:check && npm run build",
     "package": "node scripts/package.mjs",
