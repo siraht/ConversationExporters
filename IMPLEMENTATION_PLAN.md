@@ -1,6 +1,6 @@
 # ConversationExporters consolidation plan
 
-Status: release candidate; final public push pending
+Status: complete
 
 Goal: consolidate the accepted GrokExporter and ChatGPTExporter implementations into one maintainable source tree while preserving complete private archives, provider-specific web semantics, least-privilege manifests, deterministic output, and independent releases.
 
@@ -17,7 +17,7 @@ The complete standalone research, implementation history, decisions, and accepta
 - [x] Produce separate Grok-only and ChatGPT-only manifests and reproducible ZIP releases with no host-permission expansion.
 - [x] Revalidate both private archives from the consolidated tree using aggregate-only evidence.
 - [x] Add root privacy scanning, provenance, upgrade instructions, CI, packaged Chromium tests, and deterministic release verification.
-- [ ] Run the final clean-checkout gate, publish the public repository, tag `v0.1.0`, and confirm the remote refs.
+- [x] Run the final clean-checkout gate, publish the public repository, tag `v0.1.0`, and confirm the remote refs.
 
 ## Evidence
 
@@ -54,4 +54,9 @@ The complete standalone research, implementation history, decisions, and accepta
 - Pinned authoritative synthetic archive hashes obtained from the accepted standalone revisions; both consolidated outputs match.
 - Verified separate deterministic release ZIPs, exact accepted permission boundaries, and both packaged Chromium extensions.
 - Revalidated both private archives without emitting private paths or content. Added a reusable aggregate-only Grok archive auditor and reran the aggregate-only ChatGPT live-UI sampler.
-- Added CI, release verification, provenance, upgrade instructions, and this final checklist. Next: run the clean-checkout gate, publish, tag, and verify remote refs.
+- Added CI, release verification, provenance, upgrade instructions, and this final checklist.
+
+### 2026-08-02 — public consolidation released
+
+- A detached clean worktree passed fresh `npm ci`, all 126 tests, both TypeScript/build/privacy gates, both packaged Chromium tests, and reproducible independent release packaging.
+- Published the public `siraht/ConversationExporters` repository and confirmed its `main` ref. The final release commit is tagged `v0.1.0`; remote ref and CI verification close Phase CG-G.
