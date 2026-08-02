@@ -1,6 +1,6 @@
 # ChatGPTExporter implementation plan
 
-Status: complete
+Status: consolidation release candidate; repaired remote CI rerun pending
 Started: 2026-08-01
 Goal: export and independently verify every conversation exposed by all accessible ChatGPT web-history scopes without moving authentication secrets outside the authenticated page, then consolidate the proven ChatGPT and Grok implementations behind a shared core with separate least-privilege extension packages.
 
@@ -761,7 +761,7 @@ Agents must update the progress journal, decision log, and lessons after each me
 - [x] Produce Grok-only and ChatGPT-only manifests/releases with no permission expansion.
 - [x] Prove synthetic output equivalence and revalidate both private archives.
 - [x] Update documentation, attribution, upgrade paths, CI, privacy scanning, and reproducible release packaging.
-- [x] Mark the plan complete only when every checkbox and completion-contract item has evidence.
+- [ ] Mark the plan complete only when every checkbox and completion-contract item has evidence.
 
 Suggested Conventional Commit sequence begins with `chore(chatgpt): establish private-data boundary`, then uses narrow `research`, `feat`, `fix`, `test`, `docs`, and `refactor(core)` commits. Every commit must add `Co-Authored-By: OpenAI Codex <codex@openai.com>` when authored by Codex. Never combine personal export artifacts with a source commit.
 
@@ -931,4 +931,4 @@ The first implementation entry should record the Grok baseline, sibling reposito
 - Imported both accepted tags into `/home/travis/Projects/ConversationExporters`, retained provider-owned authentication/pagination/envelope/asset logic, and extracted only proven common core, filesystem, dashboard, relay, and service-worker behavior. A typed provider capability contract keeps each provider's account, scope, cursor, raw-envelope, normalized, asset, and validation evidence opaque.
 - Pinned authoritative synthetic archive hashes from both standalone tags; the consolidated outputs match. Shared tests, 31 Grok tests, 84 ChatGPT tests, both packaged Chromium extensions, privacy scanning, byte-identical accepted manifests, and two consecutive byte-identical release ZIPs pass.
 - Consolidated private revalidation reconciles all 946 Grok conversations and 107/107 complete Grok assets with zero findings, while all 14 available ChatGPT live-UI categories pass aggregate-only sampling. No private path, identifier, title, content, asset name, credential, signed URL, or browser state is committed.
-- Added root CI, privacy enforcement, provenance, upgrade instructions, deterministic release verification, and the authoritative consolidation checklist. A detached clean worktree then passed fresh dependency installation, all 126 tests, both packaged Chromium extensions, privacy/build gates, and reproducible releases. The public `siraht/ConversationExporters` repository and main ref were confirmed; the final release is tagged `v0.1.0`.
+- Added root CI, privacy enforcement, provenance, upgrade instructions, deterministic release verification, and the authoritative consolidation checklist. A detached clean worktree passed fresh dependency installation, all 126 tests, both packaged Chromium extensions, privacy/build gates, and reproducible releases. The public repository and main ref are confirmed; one simultaneous remote run exposed and repaired a wall-clock-only pause-test race, so completion remains open until the repaired remote gate passes.
