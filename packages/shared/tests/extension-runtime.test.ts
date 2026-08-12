@@ -35,6 +35,11 @@ describe("shared extension runtime", () => {
     expect(listener).toBeTypeOf("function");
     listener?.();
     expect(create).toHaveBeenCalledWith({ url: "chrome-extension://extension/dashboard.html" });
+
+    installDashboardAction("?auto=3600");
+    const automaticListener = addListener.mock.calls[1]?.[0] as (() => void) | undefined;
+    automaticListener?.();
+    expect(create).toHaveBeenLastCalledWith({ url: "chrome-extension://extension/dashboard.html?auto=3600" });
   });
 });
 

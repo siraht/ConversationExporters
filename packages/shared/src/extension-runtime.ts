@@ -5,9 +5,9 @@ export interface FindProviderTabResult {
   error?: string;
 }
 
-export function installDashboardAction(): void {
+export function installDashboardAction(query = ""): void {
   chrome.action.onClicked.addListener(() => {
-    void chrome.tabs.create({ url: chrome.runtime.getURL("dashboard.html") });
+    void chrome.tabs.create({ url: `${chrome.runtime.getURL("dashboard.html")}${query}` });
   });
 }
 
@@ -25,4 +25,3 @@ export async function findProviderTab(urls: string[], missingMessage: string): P
 export async function sendPageRequest<Response>(tabId: number, type: string, request: unknown): Promise<Response> {
   return await chrome.tabs.sendMessage(tabId, { type, request }) as Response;
 }
-

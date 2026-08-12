@@ -6,7 +6,9 @@ import { GROK_PROVIDER } from "../grok/provider";
 import type { DashboardRuntimeRequest, FindTabResult, RuntimeApiRequest } from "./protocol";
 import { isApiRequest } from "./protocol";
 
-installDashboardAction();
+declare const __NATIVE_ARCHIVE__: boolean;
+
+installDashboardAction(__NATIVE_ARCHIVE__ ? "?auto=3600" : "");
 
 chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
   if (!isTrustedExtensionSender(sender)) return false;

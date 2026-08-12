@@ -4,7 +4,9 @@ import { CHATGPT_PROVIDER } from "../chatgpt/provider";
 import { findProviderTab, installDashboardAction, isTrustedExtensionSender, sendPageRequest } from "@conversation-exporters/shared/extension-runtime";
 import { failureResponse, type ApiRequest, type ApiResponse, type FindTabResult, parseApiRequest, requestId } from "./protocol";
 
-installDashboardAction();
+declare const __NATIVE_ARCHIVE__: boolean;
+
+installDashboardAction(__NATIVE_ARCHIVE__ ? "?auto=3600" : "");
 
 chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
   if (!isTrustedExtensionSender(sender)) return false;
