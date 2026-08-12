@@ -44,6 +44,7 @@ export interface SyncSummary {
   pushBytes: number;
   mirroredSources: number;
   remoteNewVersions: number;
+  remoteIndexed: boolean;
 }
 
 export interface StateEntry {

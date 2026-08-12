@@ -49,17 +49,19 @@ export async function syncOnce(config: SyncConfig, options: SyncOptions): Promis
     let pushBytes = 0;
     let mirroredSources = 0;
     let remoteNewVersions = 0;
+    let remoteIndexed = false;
     if (options.push) {
       const mirror = await replicateWebSources(config, results);
       mirroredSources = mirror.mirroredSources;
       remoteNewVersions = mirror.remoteNewVersions;
+      remoteIndexed = mirror.remoteIndexed;
       const push = await pushWithAsm(config);
       pushed = true;
       pushObjects = push.objects;
       pushBytes = push.bytes;
     }
 
-    return summarize(results, { pushed, pushObjects, pushBytes, mirroredSources, remoteNewVersions });
+    return summarize(results, { pushed, pushObjects, pushBytes, mirroredSources, remoteNewVersions, remoteIndexed });
   });
 }
 
@@ -83,7 +85,7 @@ async function expandWorkspaceArchives(sources: string[]): Promise<string[]> {
 
 function summarize(
   results: ImportResult[],
-  push: Pick<SyncSummary, "pushed" | "pushObjects" | "pushBytes" | "mirroredSources" | "remoteNewVersions">,
+  push: Pick<SyncSummary, "pushed" | "pushObjects" | "pushBytes" | "mirroredSources" | "remoteNewVersions" | "remoteIndexed">,
 ): SyncSummary {
   return {
     scanned: results.length,

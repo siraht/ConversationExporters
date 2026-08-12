@@ -66,7 +66,7 @@ export async function pushWithAsm(config: SyncConfig): Promise<{ objects: number
 export async function replicateWebSources(
   config: SyncConfig,
   sources: Array<Pick<ImportResult, "source" | "provider">>,
-): Promise<{ mirroredSources: number; remoteNewVersions: number }> {
+): Promise<{ mirroredSources: number; remoteNewVersions: number; remoteIndexed: boolean }> {
   const liveRoot = resolve(config.dataRoot, "live");
   const eligible: Array<{ source: string; provider: Provider; relativePath: string }> = [];
   for (const item of sources) {
@@ -74,7 +74,7 @@ export async function replicateWebSources(
     const relativePath = relative(config.dataRoot, source).replaceAll("\\", "/");
     if (item.provider && source.startsWith(`${liveRoot}/`)) eligible.push({ source, provider: item.provider, relativePath });
   }
-  if (!eligible.length) return { mirroredSources: 0, remoteNewVersions: 0 };
+  if (!eligible.length) return { mirroredSources: 0, remoteNewVersions: 0, remoteIndexed: false };
   safeRemote(config.destination, "destination");
   safeRemote(config.remoteMirrorRoot, "remote mirror root", true);
   safeRemote(config.remoteArchiveRoot, "remote archive root", true);
@@ -113,7 +113,16 @@ export async function replicateWebSources(
     mirroredSources += 1;
     remoteNewVersions += numberValue(envelope.result.new_versions);
   }
-  return { mirroredSources, remoteNewVersions };
+  let remoteIndexed = false;
+  if (remoteNewVersions > 0) {
+    const indexed = await run(config.sshBinary, [
+      "--", config.destination, config.remoteAsmBinary, "--root", config.remoteArchiveRoot, "index", "--json",
+    ]);
+    const envelope = parseEnvelope(indexed.stdout || indexed.stderr);
+    if (indexed.exitCode !== 0 || envelope.ok !== true) throw new Error("remote conversation index failed");
+    remoteIndexed = true;
+  }
+  return { mirroredSources, remoteNewVersions, remoteIndexed };
 }
 
 async function run(command: string, arguments_: string[]): Promise<CommandResult> {
