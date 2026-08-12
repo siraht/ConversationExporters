@@ -8,7 +8,11 @@
   "background": { "scripts": ["background.js"] },
   "action": { "default_title": "Open Claude and Gemini Sync" },
   "browser_specific_settings": {
-    "gecko": { "id": "web-sync-exporter@conversation-exporters.local", "strict_min_version": "128.0" }
+    "gecko": {
+      "id": "web-sync-exporter@conversation-exporters.local",
+      "strict_min_version": "142.0",
+      "data_collection_permissions": { "required": ["personalCommunications", "websiteContent"] }
+    }
   },
   "content_security_policy": { "extension_pages": "script-src 'self'; object-src 'none'" },
   "content_scripts": [

@@ -8,7 +8,11 @@
   "background": { "scripts": ["service-worker.js"] },
   "action": { "default_title": "Open ChatGPTExporter" },
   "browser_specific_settings": {
-    "gecko": { "id": "chatgpt-exporter@conversation-exporters.local", "strict_min_version": "128.0" }
+    "gecko": {
+      "id": "chatgpt-exporter@conversation-exporters.local",
+      "strict_min_version": "142.0",
+      "data_collection_permissions": { "required": ["personalCommunications", "websiteContent"] }
+    }
   },
   "content_security_policy": { "extension_pages": "script-src 'self'; object-src 'none'" },
   "content_scripts": [
