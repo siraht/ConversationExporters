@@ -5,6 +5,7 @@
   "type": "stdio",
   "allowed_extensions": [
     "chatgpt-exporter@conversation-exporters.local",
+    "web-sync-exporter@conversation-exporters.local",
     "grok-exporter@conversation-exporters.local"
   ]
 }

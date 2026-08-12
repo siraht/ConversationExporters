@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Claude and Gemini Conversation Sync",
+  "version": "0.1.0",
+  "description": "Incremental private local sync using your authenticated Firefox or Zen tabs.",
+  "permissions": ["nativeMessaging", "storage", "tabs", "alarms"],
+  "host_permissions": ["https://claude.ai/*", "https://gemini.google.com/*"],
+  "background": { "scripts": ["background.js"] },
+  "action": { "default_title": "Open Claude and Gemini Sync" },
+  "browser_specific_settings": {
+    "gecko": { "id": "web-sync-exporter@conversation-exporters.local", "strict_min_version": "128.0" }
+  },
+  "content_security_policy": { "extension_pages": "script-src 'self'; object-src 'none'" },
+  "content_scripts": [
+    { "matches": ["https://claude.ai/*", "https://gemini.google.com/*"], "js": ["page-bridge.js"], "run_at": "document_start", "world": "MAIN" },
+    { "matches": ["https://claude.ai/*", "https://gemini.google.com/*"], "js": ["content-relay.js"], "run_at": "document_start" }
+  ]
+}

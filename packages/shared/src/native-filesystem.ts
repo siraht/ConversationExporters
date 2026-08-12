@@ -8,11 +8,13 @@ interface NativeReply {
   error?: string;
 }
 
+export type NativeArchiveNamespace = "chatgpt-web" | "claude-web" | "gemini-web" | "grok-web";
+
 export class NativeArchiveFileSystem implements ArchiveFileSystem {
   private readonly port = chrome.runtime.connectNative("com.conversation_exporters.archive");
   private readonly pending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void }>();
 
-  constructor(private readonly namespace: "chatgpt-web" | "grok-web", private readonly prefix = "") {
+  constructor(private readonly namespace: NativeArchiveNamespace, private readonly prefix = "") {
     if (prefix) assertSafeRelativePath(prefix);
     this.port.onMessage.addListener((value: unknown) => this.receive(value));
     this.port.onDisconnect.addListener(() => {
