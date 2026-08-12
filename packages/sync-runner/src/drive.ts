@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { basename, dirname, join } from "node:path";
 import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import type { SyncConfig } from "./types.js";
@@ -17,6 +18,7 @@ interface DriveObject {
 interface DriveIndexEntry {
   localPath: string;
   remotePath: string;
+  archiveIdentity?: string;
   mimeType?: string;
   modTime?: string;
   size?: number;
@@ -24,6 +26,7 @@ interface DriveIndexEntry {
 
 interface DriveIndex {
   schema: "conversation-drive-index/1";
+  identityAlgorithm?: "prompt-earliest-time-v1";
   objects: Record<string, DriveIndexEntry>;
 }
 
@@ -43,7 +46,8 @@ export async function captureAiStudio(config: SyncConfig): Promise<DriveCaptureS
   ]));
   const indexPath = join(destination, INDEX_NAME);
   const prior = await loadIndex(indexPath);
-  const next: DriveIndex = { schema: "conversation-drive-index/1", objects: { ...prior.objects } };
+  const trustedIdentities = prior.identityAlgorithm === "prompt-earliest-time-v1";
+  const next: DriveIndex = { schema: "conversation-drive-index/1", identityAlgorithm: "prompt-earliest-time-v1", objects: { ...prior.objects } };
 
   const pairs: string[] = [];
   for (const object of objects) {
@@ -52,6 +56,7 @@ export async function captureAiStudio(config: SyncConfig): Promise<DriveCaptureS
     next.objects[object.ID] = {
       localPath,
       remotePath: object.Path,
+      ...(trustedIdentities && previous?.archiveIdentity ? { archiveIdentity: previous.archiveIdentity } : {}),
       ...(object.MimeType ? { mimeType: object.MimeType } : {}),
       ...(object.ModTime ? { modTime: object.ModTime } : {}),
       ...(typeof object.Size === "number" ? { size: object.Size } : {}),
@@ -66,6 +71,13 @@ export async function captureAiStudio(config: SyncConfig): Promise<DriveCaptureS
       "backend", "copyid", `${config.driveRemote}:`, ...pairs.slice(index, index + COPY_BATCH_SIZE * 2),
       "--metadata", "--log-level", "ERROR",
     ]);
+  }
+  for (const object of objects) {
+    const entry = next.objects[object.ID]!;
+    if (!entry.archiveIdentity) {
+      const identity = await promptIdentity(join(destination, entry.localPath));
+      if (identity) entry.archiveIdentity = identity;
+    }
   }
   await saveIndex(indexPath, next);
   return { provider: "google-ai-studio", discovered: objects.length, copied: pairs.length / 2, retained: Object.keys(next.objects).length };
@@ -170,6 +182,29 @@ async function isFile(path: string): Promise<boolean> {
     return (await stat(path)).isFile();
   } catch (error) {
     if (isMissing(error)) return false;
+    throw error;
+  }
+}
+
+async function promptIdentity(path: string): Promise<string | undefined> {
+  try {
+    const bytes = await readFile(path);
+    const value: unknown = JSON.parse(bytes.toString("utf8"));
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    const prompt = value as Record<string, unknown>;
+    if (!("runSettings" in prompt) || !("systemInstruction" in prompt) || !prompt.chunkedPrompt || typeof prompt.chunkedPrompt !== "object") return undefined;
+    const chunks = (prompt.chunkedPrompt as Record<string, unknown>).chunks;
+    const timestamps = Array.isArray(chunks) ? chunks.flatMap((chunk) => {
+      if (!chunk || typeof chunk !== "object" || Array.isArray(chunk)) return [];
+      const timestamp = (chunk as Record<string, unknown>).createTime;
+      return typeof timestamp === "string" && timestamp ? [timestamp] : [];
+    }) : [];
+    const identityBytes = timestamps.length
+      ? `${JSON.stringify({ earliest_create_time: timestamps.sort()[0] })}\n`
+      : bytes;
+    return `prompt-${createHash("sha256").update(identityBytes).digest("hex")}`;
+  } catch (error) {
+    if (error instanceof SyntaxError || isMissing(error)) return undefined;
     throw error;
   }
 }
