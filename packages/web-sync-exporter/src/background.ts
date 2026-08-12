@@ -23,7 +23,27 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
 });
 
 async function syncProvider(provider: Provider): Promise<SyncSummary> {
-  return provider === "claude" ? await syncClaude() : await syncGemini();
+  const filesystem = new NativeArchiveFileSystem(provider === "claude" ? "claude-web" : "gemini-web");
+  try {
+    const summary = provider === "claude" ? await syncClaude() : await syncGemini();
+    await filesystem.writeTextAtomic("sync-report.json", JSON.stringify({
+      schemaVersion: 1,
+      provider,
+      status: summary.failed === 0 ? "complete" : "partial",
+      completedAt: new Date().toISOString(),
+      summary,
+    }));
+    return summary;
+  } catch (error) {
+    await filesystem.writeTextAtomic("sync-report.json", JSON.stringify({
+      schemaVersion: 1,
+      provider,
+      status: "failed",
+      completedAt: new Date().toISOString(),
+      error: error instanceof Error ? error.message : "sync failed",
+    })).catch(() => undefined);
+    throw error;
+  }
 }
 
 async function syncClaude(): Promise<SyncSummary> {
