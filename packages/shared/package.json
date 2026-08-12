@@ -11,6 +11,7 @@
     "./hash": "./src/hash.ts",
     "./json": "./src/json.ts",
     "./native-filesystem": "./src/native-filesystem.ts",
+    "./node-filesystem": "./src/node-filesystem.ts",
     "./page-relay": "./src/page-relay.ts",
     "./paths": "./src/paths.ts",
     "./provider": "./src/provider.ts",

@@ -5,8 +5,11 @@ import { build } from "esbuild";
 
 const root = process.cwd();
 const output = path.join(root, "dist", "extension");
+const cliOutput = path.join(root, "dist", "cli");
 await rm(output, { recursive: true, force: true });
+await rm(cliOutput, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
+await mkdir(cliOutput, { recursive: true });
 
 const entries = {
   "service-worker": "src/extension/service-worker.ts",
@@ -29,3 +32,15 @@ await Promise.all(Object.entries(entries).map(([name, entry]) => build({
 })));
 
 await cp(path.join(root, "public"), output, { recursive: true });
+
+await build({
+  entryPoints: [path.join(root, "src/cli/audit-local.ts")],
+  outfile: path.join(cliOutput, "audit-local.js"),
+  bundle: true,
+  format: "esm",
+  platform: "node",
+  target: ["node20"],
+  sourcemap: false,
+  minify: false,
+  legalComments: "inline",
+});
