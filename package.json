@@ -11,7 +11,7 @@
     "build:chatgpt": "npm --workspace chatgpt-exporter run build",
     "build:sync": "npm --workspace conversation-sync run build",
     "build:web-sync": "npm --workspace web-sync-exporter run build",
-    "build:firefox": "npm --workspace grok-exporter run build:firefox && npm --workspace chatgpt-exporter run build:firefox",
+    "build:firefox": "npm --workspace grok-exporter run build:firefox && npm --workspace chatgpt-exporter run build:firefox && npm --workspace web-sync-exporter run build",
     "check": "npm run check:shared && npm run check:grok && npm run check:chatgpt && npm run check:web-sync && npm run check:sync && npm run privacy:check",
     "check:shared": "npm --workspace @conversation-exporters/shared run check",
     "check:grok": "npm --workspace grok-exporter run check",

@@ -15,4 +15,4 @@ systemctl --user daemon-reload
 systemctl --user disable conversation-exporter-browser.service 2>/dev/null || true
 systemctl --user enable conversation-sync.service
 
-printf '%s\n' "Installed and enabled conversation sync services."
+printf '%s\n' "Installed the native host and enabled the conversation sync service."
