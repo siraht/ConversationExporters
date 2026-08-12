@@ -1,5 +1,5 @@
 import { safeToken, type PageReply, type PageRequest } from "./protocol";
-import { parseGeminiResponse } from "./gemini";
+import { parseGeminiChatResponse, parseGeminiResponse } from "./gemini";
 
 const requestChannel = "conversation-sync:page-request:v1";
 const responseChannel = "conversation-sync:page-response:v1";
@@ -15,6 +15,7 @@ async function execute(request: PageRequest): Promise<PageReply> {
     const result = request.operation === "claudeList" ? await claudeList()
       : request.operation === "claudeDetail" ? await claudeDetail(request.parameters)
         : request.operation === "geminiList" ? await geminiList()
+          : request.operation === "geminiDetail" ? await geminiDetail(request.parameters)
           : request.operation === "geminiExtract" ? geminiExtract()
             : (() => { throw new Error("unsupported page operation"); })();
     return { requestId: request.requestId, ok: true, result };
@@ -51,9 +52,7 @@ async function claudeDetail(parameters: Record<string, unknown> | undefined): Pr
 
 async function geminiList(): Promise<Array<{ id: string; title: string; updated_at: string | null }>> {
   if (location.hostname !== "gemini.google.com") throw new Error("wrong provider tab");
-  const wiz = (window as unknown as { WIZ_global_data?: Record<string, unknown> }).WIZ_global_data ?? {};
-  const session = { sid: String(wiz.FdrFJe ?? ""), bl: String(wiz.cfb2h ?? ""), at: String(wiz.SNlM0e ?? "") };
-  if (!session.sid || !session.bl || !session.at) throw new Error("Gemini authentication parameters are unavailable");
+  const session = geminiSession();
   const output = new Map<string, { id: string; title: string; updated_at: string | null }>();
   let cursor: string | null = null;
   for (let page = 0; page < 200; page += 1) {
@@ -68,6 +67,27 @@ async function geminiList(): Promise<Array<{ id: string; title: string; updated_
     cursor = parsed.cursor;
   }
   return [...output.values()];
+}
+
+async function geminiDetail(parameters: Record<string, unknown> | undefined): Promise<unknown> {
+  const conversationId = safeToken(parameters?.conversationId, "conversation ID").replace(/^c_/, "");
+  const limit = 1_000;
+  const session = geminiSession();
+  const payload = [`c_${conversationId}`, limit, null, 1, [1], [4], null, 1];
+  const request = JSON.stringify([[['hNvQHb', JSON.stringify(payload), null, 'generic']]]);
+  const url = `/_/BardChatUi/data/batchexecute?rpcids=hNvQHb&source-path=%2Fapp&bl=${encodeURIComponent(session.bl)}&f.sid=${encodeURIComponent(session.sid)}&hl=en&_reqid=${Math.floor(Math.random() * 900000) + 100000}&rt=c`;
+  const response = await fetch(url, { method: "POST", credentials: "include", headers: { "Content-Type": "application/x-www-form-urlencoded;charset=utf-8", "X-Same-Domain": "1" }, body: `f.req=${encodeURIComponent(request)}&at=${encodeURIComponent(session.at)}` });
+  if (!response.ok) throw new Error(`Gemini conversation request failed (${response.status})`);
+  const result = parseGeminiChatResponse(await response.text(), conversationId, limit);
+  if (!result.messages.length) throw new Error("Gemini conversation response contained no messages");
+  return result;
+}
+
+function geminiSession(): { sid: string; bl: string; at: string } {
+  const wiz = (window as unknown as { WIZ_global_data?: Record<string, unknown> }).WIZ_global_data ?? {};
+  const session = { sid: String(wiz.FdrFJe ?? ""), bl: String(wiz.cfb2h ?? ""), at: String(wiz.SNlM0e ?? "") };
+  if (!session.sid || !session.bl || !session.at) throw new Error("Gemini authentication parameters are unavailable");
+  return session;
 }
 
 function geminiExtract(): { messages: Array<{ id: string; role: "user" | "assistant"; content: string }> } {

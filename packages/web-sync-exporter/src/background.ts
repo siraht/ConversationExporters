@@ -49,7 +49,7 @@ async function syncClaude(): Promise<SyncSummary> {
   output.push(...previous.values());
   output.sort((left, right) => String(left.uuid ?? "").localeCompare(String(right.uuid ?? "")));
   await filesystem.writeTextAtomic("conversations.json", JSON.stringify(output));
-  return { provider: "claude", discovered: listing.length, fetched, unchanged, retained: previous.size };
+  return { provider: "claude", discovered: listing.length, fetched, unchanged, retained: previous.size, failed: 0 };
 }
 
 async function syncGemini(): Promise<SyncSummary> {
@@ -59,31 +59,33 @@ async function syncGemini(): Promise<SyncSummary> {
   const document = await readJson<{ conversations: JsonRecord[] }>(filesystem, "conversations.json", { conversations: [] });
   const previous = new Map(document.conversations.flatMap((row) => typeof row.id === "string" ? [[row.id, row] as const] : []));
   const output: JsonRecord[] = [];
-  let fetched = 0, unchanged = 0;
-  const captureTab = await chrome.tabs.create({ active: false, url: "https://gemini.google.com/app" });
-  try {
-    if (!captureTab.id) throw new Error("Gemini capture tab was unavailable");
-    for (const row of listing) {
-      const prior = previous.get(row.id);
-      if (prior && prior.updated_at === row.updated_at) { output.push(prior); previous.delete(row.id); unchanged += 1; continue; }
-      await chrome.tabs.update(captureTab.id, { url: `https://gemini.google.com/app/${encodeURIComponent(row.id)}` });
-      await waitForTab(captureTab.id, row.id);
-      await delay(1_500);
-      const extracted = asRecord(await pageRequest(captureTab.id, "geminiExtract"));
-      const messages = Array.isArray(extracted.messages) ? extracted.messages : [];
-      if (!messages.length) throw new Error("Gemini rendered no messages for a listed conversation");
-      output.push({ ...row, messages });
+  let fetched = 0, unchanged = 0, failed = 0;
+  for (const [index, row] of listing.entries()) {
+    const prior = previous.get(row.id);
+    if (prior && prior.updated_at === row.updated_at) { output.push(prior); previous.delete(row.id); unchanged += 1; continue; }
+    try {
+      const detail = asRecord(await pageRequest(inventoryTab.id!, "geminiDetail", { conversationId: row.id }));
+      const messages = Array.isArray(detail.messages) ? detail.messages : [];
+      if (!messages.length) throw new Error("Gemini conversation contained no messages");
+      output.push({ ...row, ...detail });
       previous.delete(row.id);
       fetched += 1;
-      await delay(1_000);
+    } catch {
+      failed += 1;
+      if (prior) { output.push(prior); previous.delete(row.id); }
     }
-  } finally {
-    if (captureTab.id) await chrome.tabs.remove(captureTab.id).catch(() => undefined);
+    if ((index + 1) % 25 === 0) await persistGemini(filesystem, output, previous);
+    await delay(250);
   }
-  output.push(...previous.values());
-  output.sort((left, right) => String(left.id ?? "").localeCompare(String(right.id ?? "")));
-  await filesystem.writeTextAtomic("conversations.json", JSON.stringify({ conversations: output }));
-  return { provider: "gemini", discovered: listing.length, fetched, unchanged, retained: previous.size };
+  const retained = previous.size;
+  await persistGemini(filesystem, output, previous);
+  return { provider: "gemini", discovered: listing.length, fetched, unchanged, retained, failed };
+}
+
+async function persistGemini(filesystem: NativeArchiveFileSystem, output: JsonRecord[], previous: Map<string, JsonRecord>): Promise<void> {
+  const conversations = [...output, ...previous.values()];
+  conversations.sort((left, right) => String(left.id ?? "").localeCompare(String(right.id ?? "")));
+  await filesystem.writeTextAtomic("conversations.json", JSON.stringify({ conversations }));
 }
 
 async function providerTab(url: string, missing: string): Promise<chrome.tabs.Tab> {
@@ -98,17 +100,6 @@ async function pageRequest(tabId: number, operation: PageRequest["operation"], p
   const reply = await chrome.tabs.sendMessage<PageRequest, PageReply>(tabId, request);
   if (!reply?.ok) throw new Error(reply?.error ?? "Provider tab did not answer");
   return reply.result;
-}
-
-async function waitForTab(tabId: number, expectedId: string): Promise<void> {
-  const deadline = Date.now() + 45_000;
-  while (Date.now() < deadline) {
-    const tab = await chrome.tabs.get(tabId);
-    if (tab.url?.includes("google.com/sorry")) throw new Error("Google CAPTCHA interrupted Gemini sync");
-    if (tab.status === "complete" && tab.url?.includes(`/app/${expectedId}`)) return;
-    await delay(250);
-  }
-  throw new Error("Gemini conversation page timed out");
 }
 
 async function readJson<T>(filesystem: NativeArchiveFileSystem, path: string, fallback: T): Promise<T> {

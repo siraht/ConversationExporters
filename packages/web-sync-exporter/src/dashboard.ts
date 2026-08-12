@@ -16,7 +16,7 @@ async function run(provider: Provider): Promise<void> {
   const response = await chrome.runtime.sendMessage<{ type: "WEB_SYNC_RUN"; provider: Provider }, { ok: boolean; result?: SyncSummary; error?: string }>({ type: "WEB_SYNC_RUN", provider });
   if (!response.ok || !response.result) { status.textContent = response.error ?? `${provider} sync failed`; return; }
   const result = response.result;
-  status.textContent = `${provider}: ${result.discovered} discovered, ${result.fetched} fetched, ${result.unchanged} unchanged.`;
+  status.textContent = `${provider}: ${result.discovered} discovered, ${result.fetched} fetched, ${result.unchanged} unchanged, ${result.failed} failed${result.failed ? " (will retry)" : ""}.`;
   log.textContent = `${new Date().toLocaleString()} ${status.textContent}\n${log.textContent}`.slice(0, 8_000);
 }
 
