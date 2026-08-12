@@ -25,6 +25,7 @@ await Promise.all(Object.entries(entries).map(([name, entry]) => build({
   sourcemap: false,
   minify: false,
   legalComments: "inline",
+  define: { __NATIVE_ARCHIVE__: "false" },
 })));
 
 await cp(path.join(root, "public"), output, { recursive: true });

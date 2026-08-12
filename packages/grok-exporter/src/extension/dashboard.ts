@@ -1,7 +1,8 @@
 import { CaptureEngine } from "../core/capture-engine";
 import { BrowserAssetFetcher } from "./asset-fetcher";
 import { RunControl } from "../core/control";
-import { DirectoryArchiveFileSystem } from "../core/filesystem";
+import { DirectoryArchiveFileSystem, type ArchiveFileSystem } from "../core/filesystem";
+import { NativeArchiveFileSystem } from "@conversation-exporters/shared/native-filesystem";
 import { DEFAULT_CAPTURE_SETTINGS, type CaptureSettings, type ProgressEvent } from "../core/types";
 import { GrokClient } from "../grok/client";
 import { GROK_PROVIDER } from "../grok/provider";
@@ -23,6 +24,8 @@ let directoryHandle: FileSystemDirectoryHandle | undefined;
 let runControl: RunControl | undefined;
 let running = false;
 const autoInterval = automaticInterval(location.search);
+declare const __NATIVE_ARCHIVE__: boolean;
+const nativeFilesystem = __NATIVE_ARCHIVE__ ? new NativeArchiveFileSystem("grok-web") : undefined;
 
 chooseButton.addEventListener("click", () => void chooseDirectory());
 openGrokButton.addEventListener("click", () => void chrome.tabs.create({ url: `${GROK_PROVIDER.primaryOrigin}/` }));
@@ -33,7 +36,19 @@ cancelButton.addEventListener("click", () => runControl?.cancel());
 void initialize();
 
 async function initialize(): Promise<void> {
-  await restoreDirectory();
+  if (nativeFilesystem) {
+    try {
+      await nativeFilesystem.ready();
+      directoryLabel.textContent = "Private local Grok archive (native host)";
+      chooseButton.hidden = true;
+      startButton.disabled = false;
+    } catch (error) {
+      showError(error);
+      return;
+    }
+  } else {
+    await restoreDirectory();
+  }
   if (autoInterval !== undefined) {
     setStatus("Automatic sync is enabled for this dashboard.", "ready");
     window.setTimeout(() => void automaticRun(), 1_000);
@@ -42,7 +57,7 @@ async function initialize(): Promise<void> {
 
 async function automaticRun(): Promise<void> {
   try {
-    if (!directoryHandle || !await ensureDirectoryPermission(directoryHandle, false)) {
+    if (!nativeFilesystem && (!directoryHandle || !await ensureDirectoryPermission(directoryHandle, false))) {
       setStatus("Automatic sync needs a one-time archive-directory selection in this browser profile.", "error");
       return;
     }
@@ -77,8 +92,8 @@ async function chooseDirectory(): Promise<void> {
 }
 
 async function startExport(): Promise<void> {
-  if (running || !directoryHandle) return;
-  if (!await ensureDirectoryPermission(directoryHandle, true)) {
+  if (running || (!directoryHandle && !nativeFilesystem)) return;
+  if (!nativeFilesystem && !await ensureDirectoryPermission(directoryHandle!, true)) {
     setStatus("Write permission was not granted.", "error");
     return;
   }
@@ -103,7 +118,7 @@ async function startExport(): Promise<void> {
     });
     const engine = new CaptureEngine({
       client,
-      filesystem: new DirectoryArchiveFileSystem(directoryHandle),
+      filesystem: archiveFilesystem(),
       cancellation: runControl,
       onProgress: showProgress,
       ...(settings.includeAssets ? { assetFetcher: new BrowserAssetFetcher() } : {}),
@@ -124,6 +139,12 @@ async function startExport(): Promise<void> {
     runControl = undefined;
     setRunningUi(false);
   }
+}
+
+function archiveFilesystem(): ArchiveFileSystem {
+  if (nativeFilesystem) return nativeFilesystem;
+  if (!directoryHandle) throw new Error("Archive directory is unavailable");
+  return new DirectoryArchiveFileSystem(directoryHandle);
 }
 
 function togglePause(): void {

@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
+    "build:firefox": "node scripts/build-firefox.mjs",
     "check": "npm run typecheck && npm test && npm run privacy:check && npm run build",
     "package": "node scripts/package.mjs",
     "privacy:check": "node scripts/privacy-check.mjs",

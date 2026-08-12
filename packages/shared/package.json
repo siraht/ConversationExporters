@@ -10,6 +10,7 @@
     "./handle-store": "./src/handle-store.ts",
     "./hash": "./src/hash.ts",
     "./json": "./src/json.ts",
+    "./native-filesystem": "./src/native-filesystem.ts",
     "./page-relay": "./src/page-relay.ts",
     "./paths": "./src/paths.ts",
     "./provider": "./src/provider.ts",

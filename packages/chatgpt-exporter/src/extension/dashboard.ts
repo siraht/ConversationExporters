@@ -1,6 +1,7 @@
 import { ChatGptClient, type DiscoveredWorkspace } from "../chatgpt/client";
 import { CHATGPT_PROVIDER } from "../chatgpt/provider";
-import { DirectoryArchiveFileSystem } from "../core/filesystem";
+import { DirectoryArchiveFileSystem, type ArchiveFileSystem } from "../core/filesystem";
+import { NativeArchiveFileSystem } from "@conversation-exporters/shared/native-filesystem";
 import { DEFAULT_INVENTORY_SETTINGS, runWorkspaceInventories } from "../chatgpt/inventory";
 import { ChatGptCaptureEngine } from "../chatgpt/capture-engine";
 import { auditArchive, type ArchiveAuditReport } from "../chatgpt/audit";
@@ -43,6 +44,8 @@ let inventoryConfirmed = false;
 let activeController: ControlledTransport | undefined;
 const autoInterval = automaticInterval(location.search);
 let automaticRunning = false;
+declare const __NATIVE_ARCHIVE__: boolean;
+const nativeFilesystems = new Map<string, NativeArchiveFileSystem>();
 
 chooseButton.addEventListener("click", () => void chooseDirectory());
 openButton.addEventListener("click", () => void chrome.tabs.create({ url: `${CHATGPT_PROVIDER.primaryOrigin}/` }));
@@ -76,7 +79,18 @@ workspaceSelect.addEventListener("change", () => {
 void initialize();
 
 async function initialize(): Promise<void> {
-  await restoreDirectory();
+  if (__NATIVE_ARCHIVE__) {
+    try {
+      const filesystem = workspaceFilesystem("probe");
+      await filesystem.ready();
+      directoryLabel.textContent = "Private local ChatGPT archive (native host)";
+    } catch (error) {
+      showError(error);
+      return;
+    }
+  } else {
+    await restoreDirectory();
+  }
   if (autoInterval !== undefined) {
     setStatus("Automatic sync is enabled for this dashboard.", "ready");
     window.setTimeout(() => void automaticCycle(), 1_000);
@@ -92,11 +106,12 @@ async function automaticCycle(): Promise<void> {
     for (const item of workspaceSelect.options) item.selected = Boolean(item.value);
     await preflightWorkspace();
     if (status.dataset.state === "error") return;
-    if (!directoryHandle || !await ensureDirectoryPermission(directoryHandle, false)) {
+    if (!__NATIVE_ARCHIVE__ && (!directoryHandle || !await ensureDirectoryPermission(directoryHandle, false))) {
       setStatus("Automatic sync needs a one-time parent-directory selection in this browser profile.", "error");
       return;
     }
-    enableSelectedDirectory(directoryHandle);
+    if (__NATIVE_ARCHIVE__) enableNativeDirectory();
+    else enableSelectedDirectory(directoryHandle!);
     await runInventory();
     if (status.dataset.state === "error" || confirmInventoryButton.disabled) return;
     confirmInventory();
@@ -120,6 +135,10 @@ async function chooseDirectory(): Promise<void> {
     setStatus("Verify one or more workspaces before choosing their parent archive directory.", "error");
     return;
   }
+  if (__NATIVE_ARCHIVE__) {
+    enableNativeDirectory();
+    return;
+  }
   try {
     if (directoryHandle && await ensureDirectoryPermission(directoryHandle, true)) {
       enableSelectedDirectory(directoryHandle);
@@ -132,6 +151,16 @@ async function chooseDirectory(): Promise<void> {
   } catch (error) {
     if (!(error instanceof DOMException && error.name === "AbortError")) showError(error);
   }
+}
+
+function enableNativeDirectory(): void {
+  directoryLabel.textContent = "Private local ChatGPT archive (native host)";
+  inventoryButton.disabled = false;
+  captureButton.disabled = true;
+  confirmInventoryButton.disabled = true;
+  revalidateButton.disabled = true;
+  inventoryConfirmed = false;
+  setStatus(`${verifiedWorkspaces.length} workspace${verifiedWorkspaces.length === 1 ? " is" : "s are"} ready for isolated native archives.`, "ready");
 }
 
 function enableSelectedDirectory(handle: FileSystemDirectoryHandle): void {
@@ -185,10 +214,10 @@ async function preflightWorkspace(): Promise<void> {
     verifiedWorkspaces = verified;
     chooseButton.disabled = false;
     captureButton.disabled = true;
-    const retainedDirectory = directoryHandle && await ensureDirectoryPermission(directoryHandle, false);
+    const retainedDirectory = __NATIVE_ARCHIVE__ || directoryHandle && await ensureDirectoryPermission(directoryHandle, false);
     if (retainedDirectory) {
       inventoryButton.disabled = false;
-      directoryLabel.textContent = `${directoryHandle!.name} (permission retained)`;
+      directoryLabel.textContent = __NATIVE_ARCHIVE__ ? "Private local ChatGPT archive (native host)" : `${directoryHandle!.name} (permission retained)`;
       setStatus(`Verified ${verified.length} selected workspace${verified.length === 1 ? "" : "s"}${emptyCount ? ` (${emptyCount} empty)` : ""}. The retained archive directory is ready.`, "ready");
     } else {
       inventoryButton.disabled = true;
@@ -241,11 +270,11 @@ function resetWorkspaceSelection(): void {
 }
 
 async function runInventory(): Promise<void> {
-  if (verifiedWorkspaces.length === 0 || !directoryHandle || !runtimeTransport) {
+  if (verifiedWorkspaces.length === 0 || (!directoryHandle && !__NATIVE_ARCHIVE__) || !runtimeTransport) {
     setStatus("Verify selected workspaces and choose their parent archive directory first.", "error");
     return;
   }
-  if (!await ensureDirectoryPermission(directoryHandle, true)) {
+  if (!__NATIVE_ARCHIVE__ && !await ensureDirectoryPermission(directoryHandle!, true)) {
     setStatus("Write permission for the archive directory is required.", "error");
     return;
   }
@@ -264,7 +293,7 @@ async function runInventory(): Promise<void> {
     setRunControls(true);
     const targets = await Promise.all(verifiedWorkspaces.map(async (workspace) => ({
       workspace,
-      filesystem: new DirectoryArchiveFileSystem(await directoryHandle!.getDirectoryHandle(`ChatGPTExport-${workspace.workspaceFingerprint}`, { create: true })),
+      filesystem: await workspaceArchive(workspace),
     })));
     const inventories = await runWorkspaceInventories({
       transport: controlled,
@@ -301,11 +330,11 @@ async function runInventory(): Promise<void> {
 }
 
 async function runCapture(): Promise<void> {
-  if (verifiedWorkspaces.length === 0 || !directoryHandle || !runtimeTransport || !inventoryConfirmed) {
+  if (verifiedWorkspaces.length === 0 || (!directoryHandle && !__NATIVE_ARCHIVE__) || !runtimeTransport || !inventoryConfirmed) {
     setStatus("Complete workspace preflight, destination selection, and inventory first.", "error");
     return;
   }
-  if (!await ensureDirectoryPermission(directoryHandle, true)) {
+  if (!__NATIVE_ARCHIVE__ && !await ensureDirectoryPermission(directoryHandle!, true)) {
     setStatus("Write permission for the archive directory is required.", "error");
     return;
   }
@@ -325,11 +354,11 @@ async function runCapture(): Promise<void> {
     activeController = controlled;
     setRunControls(true);
     for (const workspace of verifiedWorkspaces) {
-      const archive = await directoryHandle.getDirectoryHandle(`ChatGPTExport-${workspace.workspaceFingerprint}`, { create: true });
+      const filesystem = await workspaceArchive(workspace);
       const runId = `capture-${Date.now()}-${crypto.randomUUID()}`;
       const result = await new ChatGptCaptureEngine({
         transport: controlled,
-        filesystem: new DirectoryArchiveFileSystem(archive),
+        filesystem,
         workspace,
         runId,
         batchSize: integerValue(batchSize, 1, 10),
@@ -344,7 +373,7 @@ async function runCapture(): Promise<void> {
       skipped += result.skippedCount;
       failures += result.failedCount;
       partialAssets += result.partialAssetCount + result.partialProjectAssetCount;
-      audits.push(await auditArchive({ filesystem: new DirectoryArchiveFileSystem(archive), extensionVersion: chrome.runtime.getManifest().version }));
+      audits.push(await auditArchive({ filesystem, extensionVersion: chrome.runtime.getManifest().version }));
     }
     const terminal = combineAuditState(audits);
     setStatus(`Capture ${terminal}: ${captured} fetched, ${rebuilt} rebuilt, ${skipped} unchanged, ${failures} failed, ${partialAssets} partial asset scopes.`, terminal === "complete" ? "complete" : terminal === "conversations complete / assets partial" ? "partial" : "error");
@@ -371,7 +400,7 @@ function confirmInventory(): void {
 }
 
 async function revalidateArchives(): Promise<void> {
-  if (verifiedWorkspaces.length === 0 || !directoryHandle) {
+  if (verifiedWorkspaces.length === 0 || (!directoryHandle && !__NATIVE_ARCHIVE__)) {
     setStatus("Verify the workspaces and restore their archive-directory permission first.", "error");
     return;
   }
@@ -379,8 +408,7 @@ async function revalidateArchives(): Promise<void> {
   try {
     const reports: ArchiveAuditReport[] = [];
     for (const workspace of verifiedWorkspaces) {
-      const archive = await directoryHandle.getDirectoryHandle(`ChatGPTExport-${workspace.workspaceFingerprint}`);
-      reports.push(await auditArchive({ filesystem: new DirectoryArchiveFileSystem(archive), extensionVersion: chrome.runtime.getManifest().version }));
+      reports.push(await auditArchive({ filesystem: await workspaceArchive(workspace), extensionVersion: chrome.runtime.getManifest().version }));
     }
     const terminal = combineAuditState(reports);
     const conversations = reports.reduce((sum, report) => sum + report.completeConversationCount, 0);
@@ -392,6 +420,21 @@ async function revalidateArchives(): Promise<void> {
   } finally {
     setBusy(revalidateButton, false);
   }
+}
+
+async function workspaceArchive(workspace: DiscoveredWorkspace): Promise<ArchiveFileSystem> {
+  if (__NATIVE_ARCHIVE__) return workspaceFilesystem(workspace.workspaceFingerprint);
+  if (!directoryHandle) throw new Error("Archive directory is unavailable");
+  return new DirectoryArchiveFileSystem(await directoryHandle.getDirectoryHandle(`ChatGPTExport-${workspace.workspaceFingerprint}`, { create: true }));
+}
+
+function workspaceFilesystem(fingerprint: string): NativeArchiveFileSystem {
+  let filesystem = nativeFilesystems.get(fingerprint);
+  if (!filesystem) {
+    filesystem = new NativeArchiveFileSystem("chatgpt-web", `ChatGPTExport-${fingerprint}`);
+    nativeFilesystems.set(fingerprint, filesystem);
+  }
+  return filesystem;
 }
 
 function createControlledTransport(transport: RuntimeApiTransport): ControlledTransport {

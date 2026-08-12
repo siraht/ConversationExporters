@@ -1,0 +1,10 @@
+{
+  "name": "com.conversation_exporters.archive",
+  "description": "Writes ConversationExporters archives to private local provider directories.",
+  "path": "__HOST_PATH__",
+  "type": "stdio",
+  "allowed_extensions": [
+    "chatgpt-exporter@conversation-exporters.local",
+    "grok-exporter@conversation-exporters.local"
+  ]
+}
