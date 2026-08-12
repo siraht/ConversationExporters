@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { automaticInterval } from "../src/dashboard";
 import { MemoryArchiveFileSystem } from "../src/filesystem";
 import { hashJson, sha256Hex } from "../src/hash";
 import { stableStringify } from "../src/json";
@@ -36,9 +37,16 @@ describe("accepted exporter compatibility primitives", () => {
   });
 });
 
+describe("automatic dashboard mode", () => {
+  it("accepts explicit safe intervals and rejects accidental tight loops", () => {
+    expect(automaticInterval("?auto=3600")).toBe(3_600_000);
+    expect(automaticInterval("?auto=30")).toBeUndefined();
+    expect(automaticInterval("")).toBeUndefined();
+  });
+});
+
 async function collect(chunks: AsyncIterable<Uint8Array>): Promise<Uint8Array> {
   const values: number[] = [];
   for await (const chunk of chunks) values.push(...chunk);
   return new Uint8Array(values);
 }
-

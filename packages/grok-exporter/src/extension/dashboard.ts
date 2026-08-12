@@ -8,7 +8,7 @@ import { GROK_PROVIDER } from "../grok/provider";
 import { ensureDirectoryPermission, loadDirectoryHandle, saveDirectoryHandle } from "./handle-store";
 import type { FindTabResult } from "./protocol";
 import { RuntimeApiTransport } from "./protocol";
-import { boundedInteger, dashboardErrorMessage, requiredElement as element, setDashboardStatus } from "@conversation-exporters/shared/dashboard";
+import { automaticInterval, boundedInteger, dashboardErrorMessage, requiredElement as element, setDashboardStatus } from "@conversation-exporters/shared/dashboard";
 
 const chooseButton = element<HTMLButtonElement>("choose-directory");
 const openGrokButton = element<HTMLButtonElement>("open-grok");
@@ -22,6 +22,7 @@ const log = element<HTMLElement>("log");
 let directoryHandle: FileSystemDirectoryHandle | undefined;
 let runControl: RunControl | undefined;
 let running = false;
+const autoInterval = automaticInterval(location.search);
 
 chooseButton.addEventListener("click", () => void chooseDirectory());
 openGrokButton.addEventListener("click", () => void chrome.tabs.create({ url: `${GROK_PROVIDER.primaryOrigin}/` }));
@@ -29,7 +30,27 @@ startButton.addEventListener("click", () => void startExport());
 pauseButton.addEventListener("click", togglePause);
 cancelButton.addEventListener("click", () => runControl?.cancel());
 
-void restoreDirectory();
+void initialize();
+
+async function initialize(): Promise<void> {
+  await restoreDirectory();
+  if (autoInterval !== undefined) {
+    setStatus("Automatic sync is enabled for this dashboard.", "ready");
+    window.setTimeout(() => void automaticRun(), 1_000);
+  }
+}
+
+async function automaticRun(): Promise<void> {
+  try {
+    if (!directoryHandle || !await ensureDirectoryPermission(directoryHandle, false)) {
+      setStatus("Automatic sync needs a one-time archive-directory selection in this browser profile.", "error");
+      return;
+    }
+    await startExport();
+  } finally {
+    if (autoInterval !== undefined) window.setTimeout(() => void automaticRun(), autoInterval);
+  }
+}
 
 async function restoreDirectory(): Promise<void> {
   directoryHandle = await loadDirectoryHandle();

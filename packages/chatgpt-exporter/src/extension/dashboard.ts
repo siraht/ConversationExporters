@@ -7,7 +7,7 @@ import { auditArchive, type ArchiveAuditReport } from "../chatgpt/audit";
 import { ControlledTransport } from "../core/request-control";
 import { ensureDirectoryPermission, loadDirectoryHandle, saveDirectoryHandle } from "./handle-store";
 import { BridgeResponseError, RuntimeApiTransport, type FindTabResult } from "./protocol";
-import { dashboardErrorMessage, requiredElement as element, setDashboardStatus, strictInteger } from "@conversation-exporters/shared/dashboard";
+import { automaticInterval, dashboardErrorMessage, requiredElement as element, setDashboardStatus, strictInteger } from "@conversation-exporters/shared/dashboard";
 
 const chooseButton = element<HTMLButtonElement>("choose-directory");
 const openButton = element<HTMLButtonElement>("open-chatgpt");
@@ -41,6 +41,8 @@ let workspaces: DiscoveredWorkspace[] = [];
 let verifiedWorkspaces: DiscoveredWorkspace[] = [];
 let inventoryConfirmed = false;
 let activeController: ControlledTransport | undefined;
+const autoInterval = automaticInterval(location.search);
+let automaticRunning = false;
 
 chooseButton.addEventListener("click", () => void chooseDirectory());
 openButton.addEventListener("click", () => void chrome.tabs.create({ url: `${CHATGPT_PROVIDER.primaryOrigin}/` }));
@@ -71,7 +73,39 @@ workspaceSelect.addEventListener("change", () => {
   preflightButton.disabled = workspaceSelect.selectedOptions.length === 0;
   directoryLabel.textContent = workspaceSelect.selectedOptions.length ? "Verify selected workspaces first" : "Select one or more workspaces first";
 });
-void restoreDirectory();
+void initialize();
+
+async function initialize(): Promise<void> {
+  await restoreDirectory();
+  if (autoInterval !== undefined) {
+    setStatus("Automatic sync is enabled for this dashboard.", "ready");
+    window.setTimeout(() => void automaticCycle(), 1_000);
+  }
+}
+
+async function automaticCycle(): Promise<void> {
+  if (automaticRunning) return;
+  automaticRunning = true;
+  try {
+    await findTabAndWorkspaces();
+    if (status.dataset.state === "error") return;
+    for (const item of workspaceSelect.options) item.selected = Boolean(item.value);
+    await preflightWorkspace();
+    if (status.dataset.state === "error") return;
+    if (!directoryHandle || !await ensureDirectoryPermission(directoryHandle, false)) {
+      setStatus("Automatic sync needs a one-time parent-directory selection in this browser profile.", "error");
+      return;
+    }
+    enableSelectedDirectory(directoryHandle);
+    await runInventory();
+    if (status.dataset.state === "error" || confirmInventoryButton.disabled) return;
+    confirmInventory();
+    await runCapture();
+  } finally {
+    automaticRunning = false;
+    if (autoInterval !== undefined) window.setTimeout(() => void automaticCycle(), autoInterval);
+  }
+}
 
 async function restoreDirectory(): Promise<void> {
   directoryHandle = await loadDirectoryHandle();

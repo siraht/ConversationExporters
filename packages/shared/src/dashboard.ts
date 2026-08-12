@@ -23,3 +23,10 @@ export function strictInteger(input: HTMLInputElement, minimum: number, maximum:
   if (!Number.isInteger(value) || value < minimum || value > maximum) throw new Error(`${input.id} must be ${minimum}-${maximum}.`);
   return value;
 }
+
+export function automaticInterval(search: string, minimumSeconds = 300): number | undefined {
+  const raw = new URLSearchParams(search).get("auto");
+  if (raw === null) return undefined;
+  const seconds = Number(raw);
+  return Number.isFinite(seconds) && seconds >= minimumSeconds ? Math.round(seconds) * 1_000 : undefined;
+}

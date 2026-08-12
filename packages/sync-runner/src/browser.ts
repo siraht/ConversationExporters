@@ -1,4 +1,5 @@
 import { mkdir } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type BrowserContext } from "playwright";
 import type { SyncConfig } from "./types.js";
@@ -12,8 +13,11 @@ export async function launchProviderBrowser(
 ): Promise<BrowserContext> {
   const profile = join(config.dataRoot, "browser-profiles", provider);
   await mkdir(profile, { recursive: true, mode: 0o700 });
+  const installedChrome = process.env.CONVERSATION_BROWSER_EXECUTABLE
+    || (existsSync("/usr/bin/google-chrome") ? "/usr/bin/google-chrome" : undefined);
   return await chromium.launchPersistentContext(profile, {
     headless: !headed,
+    ...(installedChrome ? { executablePath: installedChrome } : {}),
     viewport: { width: 1440, height: 1000 },
     locale: "en-US",
     args: ["--disable-blink-features=AutomationControlled"],

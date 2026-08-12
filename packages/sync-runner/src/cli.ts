@@ -5,6 +5,7 @@ import { captureClaude } from "./claude.js";
 import { captureGemini } from "./gemini.js";
 import { login, type BrowserProvider } from "./browser.js";
 import { captureAiStudio, configureDrive } from "./drive.js";
+import { runExporterExtensions } from "./extensions.js";
 
 type CaptureProvider = BrowserProvider | "ai-studio";
 
@@ -12,6 +13,13 @@ async function main(arguments_: string[]): Promise<void> {
   const command = arguments_[0] ?? "once";
   const push = arguments_.includes("--push");
   const config = configFromEnvironment();
+
+  if (command === "extensions") {
+    const intervalSeconds = positiveNumber(option(arguments_, "--interval") ?? "3600", "interval");
+    if (intervalSeconds < 300) throw usage("extension interval must be at least 300 seconds");
+    await runExporterExtensions(config, intervalSeconds);
+    return;
+  }
 
   if (command === "login") {
     const provider = captureProvider(arguments_[1]);
@@ -100,7 +108,7 @@ function delay(milliseconds: number): Promise<void> {
 
 function usage(reason?: string): Error {
   const prefix = reason ? `${reason}\n\n` : "";
-  return new Error(`${prefix}Usage:\n  conversation-sync login <claude|gemini|ai-studio>\n  conversation-sync capture <claude|gemini|ai-studio> [--headed] [--push]\n  conversation-sync once [--push]\n  conversation-sync import PATH [--push]\n  conversation-sync watch [--capture claude,gemini,ai-studio] [--interval SECONDS] [--push]\n`);
+  return new Error(`${prefix}Usage:\n  conversation-sync extensions [--interval SECONDS]\n  conversation-sync login <claude|gemini|ai-studio>\n  conversation-sync capture <claude|gemini|ai-studio> [--headed] [--push]\n  conversation-sync once [--push]\n  conversation-sync import PATH [--push]\n  conversation-sync watch [--capture claude,gemini,ai-studio] [--interval SECONDS] [--push]\n`);
 }
 
 function captureProvider(value: string | undefined): CaptureProvider {
