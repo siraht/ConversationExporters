@@ -1,0 +1,25 @@
+{
+  "name": "conversation-sync",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Idempotent local ingestion and Flywheel replication for conversation exports.",
+  "type": "module",
+  "bin": {
+    "conversation-sync": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "npm run typecheck && npm test && npm run build",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.0"
+  },
+  "license": "MIT"
+}

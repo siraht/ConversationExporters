@@ -6,13 +6,15 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build:grok && npm run build:chatgpt",
+    "build": "npm run build:grok && npm run build:chatgpt && npm run build:sync",
     "build:grok": "npm --workspace grok-exporter run build",
     "build:chatgpt": "npm --workspace chatgpt-exporter run build",
-    "check": "npm run check:shared && npm run check:grok && npm run check:chatgpt && npm run privacy:check",
+    "build:sync": "npm --workspace conversation-sync run build",
+    "check": "npm run check:shared && npm run check:grok && npm run check:chatgpt && npm run check:sync && npm run privacy:check",
     "check:shared": "npm --workspace @conversation-exporters/shared run check",
     "check:grok": "npm --workspace grok-exporter run check",
     "check:chatgpt": "npm --workspace chatgpt-exporter run check",
+    "check:sync": "npm --workspace conversation-sync run check",
     "test:e2e": "npm run test:e2e:grok && npm run test:e2e:chatgpt",
     "test:e2e:grok": "npm --workspace grok-exporter run test:e2e",
     "test:e2e:chatgpt": "npm --workspace chatgpt-exporter run test:e2e",
