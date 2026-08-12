@@ -42,6 +42,22 @@ describe("syncOnce", () => {
     const result = await syncOnce(fixture.config, { push: true });
     expect(result).toMatchObject({ pushed: true, pushObjects: 4, pushBytes: 2048 });
   });
+
+  it("mirrors changed live sources without deletion and imports them remotely before native push", async () => {
+    const fixture = await setup();
+    const source = join(fixture.dataRoot, "live", "claude-web");
+    await mkdir(source, { recursive: true });
+    await writeFile(join(source, "conversations.json"), "[]");
+    const result = await syncOnce(fixture.config, { push: true });
+    expect(result).toMatchObject({ mirroredSources: 1, remoteNewVersions: 2, pushed: true });
+    const rsync = await readFile(fixture.rsyncCalls, "utf8");
+    expect(rsync).toContain("--archive --protect-args --partial --itemize-changes");
+    expect(rsync).not.toContain("--delete");
+    const ssh = await readFile(fixture.sshCalls, "utf8");
+    expect(ssh).toContain("chmod 700 -- /data/agent-session-archive/web-mirror");
+    expect(ssh).toContain("web-import /data/agent-session-archive/web-mirror/laptop/live/claude-web");
+    expect(ssh).toContain("--root /data/agent-session-archive");
+  });
 });
 
 describe("source fingerprints", () => {
@@ -78,6 +94,8 @@ async function setup(): Promise<{
   dataRoot: string;
   config: SyncConfig;
   calls: string;
+  rsyncCalls: string;
+  sshCalls: string;
 }> {
   const root = await mkdtemp(join(tmpdir(), "conversation-sync-"));
   roots.push(root);
@@ -85,18 +103,33 @@ async function setup(): Promise<{
   const incoming = join(dataRoot, "incoming");
   const binary = join(root, "fake-asm");
   const calls = join(root, "calls.txt");
+  const rsyncCalls = join(root, "rsync-calls.txt");
+  const sshCalls = join(root, "ssh-calls.txt");
+  const rsync = join(root, "fake-rsync");
+  const ssh = join(root, "fake-ssh");
   await mkdir(incoming, { recursive: true });
   await writeFile(binary, `#!/bin/sh\nprintf '%s\\n' "$*" >> '${calls}'\ncase "$*" in\n  *metadata.zip*) printf '%s\\n' '{"ok":false,"error":{"code":"adapter_not_detected"}}' >&2; exit 2 ;;\n  *' push '*) printf '%s\\n' '{"ok":true,"result":{"objects":4,"bytes":2048}}' ;;\n  *) printf '%s\\n' '{"ok":true,"result":{"provider":"claude-web","candidates":3,"new_versions":3,"conversation_ids":["private-conversation-id"]}}' ;;\nesac\n`);
   await chmod(binary, 0o700);
+  await writeFile(rsync, `#!/bin/sh\nprintf '%s\\n' "$*" >> '${rsyncCalls}'\nprintf '%s\\n' '>f+++++++++'\n`);
+  await writeFile(ssh, `#!/bin/sh\nprintf '%s\\n' "$*" >> '${sshCalls}'\ncase "$*" in\n  *web-import*) printf '%s\\n' '{"ok":true,"result":{"provider":"claude-web","candidates":3,"new_versions":2}}' ;;\nesac\n`);
+  await chmod(rsync, 0o700);
+  await chmod(ssh, 0o700);
   return {
     dataRoot,
     calls,
+    rsyncCalls,
+    sshCalls,
     config: {
       archiveRoot: join(root, "archive"),
       asmBinary: binary,
       dataRoot,
       accountLabel: "personal",
       destination: "flywheel",
+      remoteMirrorRoot: "/data/agent-session-archive/web-mirror/laptop",
+      remoteArchiveRoot: "/data/agent-session-archive",
+      remoteAsmBinary: "asm",
+      rsyncBinary: rsync,
+      sshBinary: ssh,
       rcloneBinary: "rclone",
       driveRemote: "conversation-drive",
       drivePath: "Google AI Studio",

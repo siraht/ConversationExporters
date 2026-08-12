@@ -1,7 +1,7 @@
 import { readdir, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fingerprintPath } from "./hash.js";
-import { importWithAsm, pushWithAsm } from "./asm.js";
+import { importWithAsm, pushWithAsm, replicateWebSources } from "./asm.js";
 import { loadState, saveState, withLock } from "./state.js";
 import type { ImportResult, Provider, SyncConfig, SyncSummary } from "./types.js";
 
@@ -47,14 +47,19 @@ export async function syncOnce(config: SyncConfig, options: SyncOptions): Promis
     let pushed = false;
     let pushObjects = 0;
     let pushBytes = 0;
+    let mirroredSources = 0;
+    let remoteNewVersions = 0;
     if (options.push) {
+      const mirror = await replicateWebSources(config, results);
+      mirroredSources = mirror.mirroredSources;
+      remoteNewVersions = mirror.remoteNewVersions;
       const push = await pushWithAsm(config);
       pushed = true;
       pushObjects = push.objects;
       pushBytes = push.bytes;
     }
 
-    return summarize(results, { pushed, pushObjects, pushBytes });
+    return summarize(results, { pushed, pushObjects, pushBytes, mirroredSources, remoteNewVersions });
   });
 }
 
@@ -78,7 +83,7 @@ async function expandWorkspaceArchives(sources: string[]): Promise<string[]> {
 
 function summarize(
   results: ImportResult[],
-  push: Pick<SyncSummary, "pushed" | "pushObjects" | "pushBytes">,
+  push: Pick<SyncSummary, "pushed" | "pushObjects" | "pushBytes" | "mirroredSources" | "remoteNewVersions">,
 ): SyncSummary {
   return {
     scanned: results.length,

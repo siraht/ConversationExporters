@@ -14,6 +14,11 @@ export interface SyncConfig {
   dataRoot: string;
   accountLabel: string;
   destination: string;
+  remoteMirrorRoot: string;
+  remoteArchiveRoot: string;
+  remoteAsmBinary: string;
+  rsyncBinary: string;
+  sshBinary: string;
   rcloneBinary: string;
   driveRemote: string;
   drivePath: string;
@@ -37,6 +42,8 @@ export interface SyncSummary {
   pushed: boolean;
   pushObjects: number;
   pushBytes: number;
+  mirroredSources: number;
+  remoteNewVersions: number;
 }
 
 export interface StateEntry {
