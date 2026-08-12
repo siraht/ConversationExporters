@@ -51,7 +51,7 @@ describe("syncOnce", () => {
     const result = await syncOnce(fixture.config, { push: true });
     expect(result).toMatchObject({ mirroredSources: 1, remoteNewVersions: 2, pushed: true });
     const rsync = await readFile(fixture.rsyncCalls, "utf8");
-    expect(rsync).toContain("--archive --protect-args --partial --itemize-changes");
+    expect(rsync).toContain("--archive --protect-args --partial --compress --compress-choice=zstd --itemize-changes");
     expect(rsync).not.toContain("--delete");
     const ssh = await readFile(fixture.sshCalls, "utf8");
     expect(ssh).toContain("chmod 700 -- /data/agent-session-archive/web-mirror");

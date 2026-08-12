@@ -95,7 +95,8 @@ export async function replicateWebSources(
     const localArgument = metadata.isDirectory() ? `${item.source}/` : item.source;
     const remoteArgument = `${config.destination}:${metadata.isDirectory() ? `${remoteSource}/` : remoteSource}`;
     const copy = await run(config.rsyncBinary, [
-      "--archive", "--protect-args", "--partial", "--itemize-changes", "--out-format=%i",
+      "--archive", "--protect-args", "--partial", "--compress", "--compress-choice=zstd",
+      "--itemize-changes", "--out-format=%i",
       "--chmod=F600,D700", "--", localArgument, remoteArgument,
     ]);
     if (copy.exitCode !== 0) throw new Error("web mirror transfer failed");
