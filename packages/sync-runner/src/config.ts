@@ -10,5 +10,8 @@ export function configFromEnvironment(environment = process.env): SyncConfig {
     dataRoot: environment.CONVERSATION_SYNC_ROOT || join(home, "ConversationImports"),
     accountLabel: environment.CONVERSATION_ACCOUNT_LABEL || "personal",
     destination: environment.CONVERSATION_SYNC_DESTINATION || "flywheel",
+    rcloneBinary: environment.RCLONE_BINARY || "rclone",
+    driveRemote: environment.CONVERSATION_DRIVE_REMOTE || "conversation-drive",
+    drivePath: environment.CONVERSATION_AI_STUDIO_PATH || "Google AI Studio",
   };
 }

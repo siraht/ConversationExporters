@@ -16,6 +16,9 @@
   "engines": {
     "node": ">=20"
   },
+  "dependencies": {
+    "playwright": "^1.54.0"
+  },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "typescript": "^5.8.0",

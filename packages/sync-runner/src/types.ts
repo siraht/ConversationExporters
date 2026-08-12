@@ -14,6 +14,9 @@ export interface SyncConfig {
   dataRoot: string;
   accountLabel: string;
   destination: string;
+  rcloneBinary: string;
+  driveRemote: string;
+  drivePath: string;
 }
 
 export interface ImportResult {

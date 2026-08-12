@@ -65,6 +65,9 @@ async function setup(): Promise<{
       dataRoot,
       accountLabel: "personal",
       destination: "flywheel",
+      rcloneBinary: "rclone",
+      driveRemote: "conversation-drive",
+      drivePath: "Google AI Studio",
     },
   };
 }
