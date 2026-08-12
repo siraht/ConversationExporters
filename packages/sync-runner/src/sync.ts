@@ -21,7 +21,7 @@ export async function syncOnce(config: SyncConfig, options: SyncOptions): Promis
       const source = resolve(candidate);
       const fingerprint = await fingerprintPath(source);
       const previous = state.sources[source];
-      if (previous?.fingerprint === fingerprint) {
+      if (previous?.fingerprint === fingerprint && previous.status === "imported") {
         results.push({
           source,
           status: "unchanged",
@@ -59,11 +59,21 @@ export async function syncOnce(config: SyncConfig, options: SyncOptions): Promis
 }
 
 export async function discoverSources(dataRoot: string): Promise<string[]> {
+  const live = await children(join(dataRoot, "live"));
   const sources = [
     ...await children(join(dataRoot, "incoming")),
-    ...await children(join(dataRoot, "live")),
+    ...await expandWorkspaceArchives(live),
   ];
   return sources.sort((left, right) => left.localeCompare(right));
+}
+
+async function expandWorkspaceArchives(sources: string[]): Promise<string[]> {
+  const expanded: string[] = [];
+  for (const source of sources) {
+    if (source.endsWith("/chatgpt-web")) expanded.push(...await children(source));
+    else expanded.push(source);
+  }
+  return expanded;
 }
 
 function summarize(
@@ -89,13 +99,21 @@ async function children(path: string): Promise<string[]> {
       if (entry.startsWith(".")) continue;
       const candidate = join(path, entry);
       const metadata = await stat(candidate);
-      if (metadata.isFile() || metadata.isDirectory()) output.push(candidate);
+      if (metadata.isFile() || metadata.isDirectory() && await containsFile(candidate)) output.push(candidate);
     }
     return output;
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === "ENOENT") return [];
     throw error;
   }
+}
+
+async function containsFile(path: string): Promise<boolean> {
+  for (const entry of await readdir(path, { withFileTypes: true })) {
+    if (entry.isFile() || entry.isSymbolicLink()) return true;
+    if (entry.isDirectory() && await containsFile(join(path, entry.name))) return true;
+  }
+  return false;
 }
 
 function providerFromLivePath(dataRoot: string, source: string): Provider | undefined {

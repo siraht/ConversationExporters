@@ -1,10 +1,11 @@
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtemp } from "node:fs/promises";
 import { afterEach, describe, expect, it } from "vitest";
 import { rm } from "node:fs/promises";
-import { syncOnce } from "../src/sync.js";
+import { discoverSources, syncOnce } from "../src/sync.js";
+import { fingerprintPath } from "../src/hash.js";
 import type { SyncConfig } from "../src/types.js";
 
 const roots: string[] = [];
@@ -18,19 +19,20 @@ describe("syncOnce", () => {
     const fixture = await setup();
     await writeFile(join(fixture.dataRoot, "incoming", "claude.zip"), "revision-one");
     await writeFile(join(fixture.dataRoot, "incoming", "metadata.zip"), "unsupported");
+    await mkdir(join(fixture.dataRoot, "live", "gemini-web"), { recursive: true });
 
     const first = await syncOnce(fixture.config, { push: false });
     expect(first).toMatchObject({ scanned: 2, imported: 1, unsupported: 1, newVersions: 3 });
 
     const second = await syncOnce(fixture.config, { push: false });
-    expect(second).toMatchObject({ scanned: 2, imported: 0, unchanged: 2, newVersions: 0 });
+    expect(second).toMatchObject({ scanned: 2, imported: 0, unchanged: 1, unsupported: 1, newVersions: 0 });
 
     await writeFile(join(fixture.dataRoot, "incoming", "claude.zip"), "revision-two");
     const third = await syncOnce(fixture.config, { push: false });
-    expect(third).toMatchObject({ scanned: 2, imported: 1, unchanged: 1, newVersions: 3 });
+    expect(third).toMatchObject({ scanned: 2, imported: 1, unchanged: 0, unsupported: 1, newVersions: 3 });
 
     const calls = (await readFile(fixture.calls, "utf8")).trim().split("\n");
-    expect(calls).toHaveLength(3);
+    expect(calls).toHaveLength(5);
     expect(JSON.stringify(first)).not.toContain("private-conversation-id");
   });
 
@@ -39,6 +41,36 @@ describe("syncOnce", () => {
     await writeFile(join(fixture.dataRoot, "incoming", "claude.zip"), "revision-one");
     const result = await syncOnce(fixture.config, { push: true });
     expect(result).toMatchObject({ pushed: true, pushObjects: 4, pushBytes: 2048 });
+  });
+});
+
+describe("source fingerprints", () => {
+  it("hashes standalone file contents and directory file metadata", async () => {
+    const root = await mkdtemp(join(tmpdir(), "conversation-fingerprint-"));
+    roots.push(root);
+    const nested = join(root, "nested");
+    const file = join(nested, "conversation.json");
+    await mkdir(nested);
+    await writeFile(file, "one");
+    const directoryBefore = await fingerprintPath(root);
+    const fileBefore = await fingerprintPath(file);
+    await writeFile(file, "two");
+    const future = new Date(Date.now() + 2_000);
+    await utimes(file, future, future);
+    expect(await fingerprintPath(root)).not.toBe(directoryBefore);
+    expect(await fingerprintPath(file)).not.toBe(fileBefore);
+  });
+});
+
+describe("source discovery", () => {
+  it("treats each ChatGPT workspace archive as an import root and skips empty provider directories", async () => {
+    const root = await mkdtemp(join(tmpdir(), "conversation-discovery-"));
+    roots.push(root);
+    const workspace = join(root, "live", "chatgpt-web", "ChatGPTExport-workspace");
+    await mkdir(workspace, { recursive: true });
+    await writeFile(join(workspace, "archive.json"), "{}");
+    await mkdir(join(root, "live", "gemini-web"), { recursive: true });
+    expect(await discoverSources(root)).toEqual([workspace]);
   });
 });
 

@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+process.umask(0o077);
+
 import { configFromEnvironment } from "./config.js";
 import { syncOnce } from "./sync.js";
 import { captureClaude } from "./claude.js";
