@@ -9,6 +9,7 @@ import { isApiRequest } from "./protocol";
 declare const __NATIVE_ARCHIVE__: boolean;
 
 installDashboardAction(__NATIVE_ARCHIVE__ ? "?auto=3600" : "");
+if (__NATIVE_ARCHIVE__) installAutomaticDashboard();
 
 chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
   if (!isTrustedExtensionSender(sender)) return false;
@@ -26,6 +27,21 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
 
 async function findGrokTab(): Promise<FindTabResult> {
   return await findProviderTab([`${GROK_PROVIDER.primaryOrigin}/*`], "Open and sign in to grok.com, then try again.");
+}
+
+function installAutomaticDashboard(): void {
+  const alarm = "grok-native-sync";
+  const ensure = async (): Promise<void> => {
+    const url = chrome.runtime.getURL("dashboard.html?auto=3600");
+    const tabs = await chrome.tabs.query({});
+    if (!tabs.some((tab) => tab.url === url)) await chrome.tabs.create({ url, active: false });
+  };
+  chrome.runtime.onInstalled.addListener(() => {
+    void chrome.alarms.create(alarm, { periodInMinutes: 60 });
+    void ensure();
+  });
+  chrome.runtime.onStartup.addListener(() => { void ensure(); });
+  chrome.alarms.onAlarm.addListener((value) => { if (value.name === alarm) void ensure(); });
 }
 
 async function forwardApiRequest(message: RuntimeApiRequest): Promise<ApiResponse> {

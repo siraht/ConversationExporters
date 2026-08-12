@@ -3,7 +3,7 @@
   "name": "GrokExporter for Firefox and Zen",
   "version": "0.1.0",
   "description": "Resumable local Grok exports through the ConversationExporters native host.",
-  "permissions": ["nativeMessaging", "storage", "tabs", "unlimitedStorage"],
+  "permissions": ["alarms", "nativeMessaging", "storage", "tabs", "unlimitedStorage"],
   "host_permissions": [
     "https://grok.com/*",
     "https://assets.grok.com/*",
