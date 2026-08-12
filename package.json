@@ -15,6 +15,7 @@
     "check:grok": "npm --workspace grok-exporter run check",
     "check:chatgpt": "npm --workspace chatgpt-exporter run check",
     "check:sync": "npm --workspace conversation-sync run check",
+    "install:sync": "npm --workspace conversation-sync run install:systemd",
     "test:e2e": "npm run test:e2e:grok && npm run test:e2e:chatgpt",
     "test:e2e:grok": "npm --workspace grok-exporter run test:e2e",
     "test:e2e:chatgpt": "npm --workspace chatgpt-exporter run test:e2e",

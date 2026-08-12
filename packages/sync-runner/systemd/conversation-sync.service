@@ -1,0 +1,15 @@
+[Unit]
+Description=Capture, archive, and replicate web conversations
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Projects/ConversationExporters
+ExecStart=/usr/bin/node %h/Projects/ConversationExporters/packages/sync-runner/dist/cli.js watch --capture claude,gemini,ai-studio --interval 3600 --push
+Restart=on-failure
+RestartSec=30
+UMask=0077
+
+[Install]
+WantedBy=default.target
