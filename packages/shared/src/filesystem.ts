@@ -6,6 +6,7 @@ export interface ArchiveFileSystem {
   readText(path: string): Promise<string | undefined>;
   readBytes(path: string): Promise<Uint8Array | undefined>;
   exists(path: string): Promise<boolean>;
+  byteSize(path: string): Promise<number | undefined>;
   writeByteChunksAtomic(path: string, chunks: AsyncIterable<Uint8Array>): Promise<void>;
   readByteChunks(path: string, chunkSize?: number): AsyncIterable<Uint8Array>;
   listPaths(prefix?: string): Promise<string[]>;
@@ -69,6 +70,15 @@ export class DirectoryArchiveFileSystem implements ArchiveFileSystem {
   }
   async exists(path: string): Promise<boolean> {
     return (await this.readBytes(path)) !== undefined;
+  }
+  async byteSize(path: string): Promise<number | undefined> {
+    try {
+      const { directory, name } = await this.resolveParent(path, false);
+      return (await (await directory.getFileHandle(name)).getFile()).size;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "NotFoundError") return undefined;
+      throw error;
+    }
   }
   private async resolveParent(path: string, create: boolean): Promise<{ directory: FileSystemDirectoryHandle; name: string }> {
     assertSafeRelativePath(path);
@@ -141,6 +151,10 @@ export class MemoryArchiveFileSystem implements ArchiveFileSystem {
     assertSafeRelativePath(path);
     return this.files.has(path);
   }
+  async byteSize(path: string): Promise<number | undefined> {
+    assertSafeRelativePath(path);
+    return this.files.get(path)?.byteLength;
+  }
   paths(): string[] {
     return [...this.files.keys()].sort();
   }
@@ -149,4 +163,3 @@ export class MemoryArchiveFileSystem implements ArchiveFileSystem {
 async function* oneChunk(content: Uint8Array): AsyncIterable<Uint8Array> {
   yield content;
 }
-

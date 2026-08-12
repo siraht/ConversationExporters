@@ -315,8 +315,8 @@ async function hashAndSize(filesystem: ArchiveFileSystem, path: string): Promise
 }
 
 async function byteSize(filesystem: ArchiveFileSystem, path: string): Promise<number> {
-  let size = 0;
-  for await (const chunk of filesystem.readByteChunks(path)) size += chunk.byteLength;
+  const size = await filesystem.byteSize(path);
+  if (size === undefined) throw new Error(`Archive file disappeared during audit: ${path}`);
   return size;
 }
 

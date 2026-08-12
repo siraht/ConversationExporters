@@ -92,6 +92,13 @@ export class NativeArchiveFileSystem implements ArchiveFileSystem {
     return await this.request("exists", { path: this.path(path) }) === true;
   }
 
+  async byteSize(path: string): Promise<number | undefined> {
+    const result = await this.request("size", { path: this.path(path) });
+    if (result === null) return undefined;
+    if (!Number.isSafeInteger(result) || Number(result) < 0) throw new Error("Native archive host returned an invalid file size");
+    return Number(result);
+  }
+
   async listPaths(prefix = ""): Promise<string[]> {
     if (prefix) assertSafeRelativePath(prefix);
     const result = await this.request("list", { prefix: this.path(prefix, true) });

@@ -123,6 +123,10 @@ async function execute(request: RequestMessage): Promise<unknown> {
       try { await stat(targetPath(root, request.path)); return true; }
       catch (error) { if (isMissing(error)) return false; throw error; }
     }
+    case "size": {
+      try { return (await stat(targetPath(root, request.path))).size; }
+      catch (error) { if (isMissing(error)) return null; throw error; }
+    }
     case "list": {
       const prefix = targetPath(root, request.prefix, true);
       const base = root;

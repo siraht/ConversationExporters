@@ -104,6 +104,7 @@ class FaultOnceFilesystem implements ArchiveFileSystem {
   readText(path: string) { return this.inner.readText(path); }
   readBytes(path: string) { return this.inner.readBytes(path); }
   exists(path: string) { return this.inner.exists(path); }
+  byteSize(path: string) { return this.inner.byteSize(path); }
   readByteChunks(path: string, chunkSize?: number) { return this.inner.readByteChunks(path, chunkSize); }
   listPaths(prefix?: string) { return this.inner.listPaths(prefix); }
   remove(path: string) { return this.inner.remove(path); }
