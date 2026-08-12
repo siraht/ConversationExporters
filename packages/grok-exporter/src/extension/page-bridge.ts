@@ -52,7 +52,20 @@ async function execute(request: ApiRequest): Promise<ApiResponse> {
         },
       } satisfies ApiFailureResponse;
     }
-    const body: unknown = text.trim() ? JSON.parse(text) : {};
+    const contentType = response.headers.get("Content-Type")?.toLowerCase() ?? "";
+    if (text.trimStart().startsWith("<") || contentType.includes("text/html")) {
+      return failure(
+        request.requestId,
+        "Grok returned a web page instead of API data. Refresh the signed-in Grok tab and retry; if it persists, the web endpoint has changed.",
+        "GROK_NON_JSON_RESPONSE",
+      );
+    }
+    let body: unknown;
+    try {
+      body = text.trim() ? JSON.parse(text) : {};
+    } catch {
+      return failure(request.requestId, "Grok returned malformed API data.", "INVALID_JSON_RESPONSE");
+    }
     if (!isJsonValue(body)) return failure(request.requestId, "Grok returned an unsupported JSON value.", "INVALID_JSON_RESPONSE");
     return {
       requestId: request.requestId,

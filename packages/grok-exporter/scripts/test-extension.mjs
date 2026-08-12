@@ -34,6 +34,11 @@ const server = https.createServer({
     return;
   }
   if (url.pathname === "/rest/app-chat/conversations" && request.headers.cookie?.includes("sso=fixture")) {
+    if (url.searchParams.has("html")) {
+      response.writeHead(200, { "Content-Type": "text/html" });
+      response.end("<!doctype html><title>Sign in</title>");
+      return;
+    }
     response.writeHead(200, { "Content-Type": "application/json" });
     response.end(JSON.stringify({ conversations: [{ conversationId: "fixture-conversation", title: "Synthetic" }] }));
     return;
@@ -84,6 +89,19 @@ try {
   }), { tabId: tab.tabId });
   assert(response.ok, `Authenticated bridge failed: ${JSON.stringify(response)}`);
   assert(response.body?.conversations?.[0]?.conversationId === "fixture-conversation", "Bridge returned the wrong fixture body.");
+
+  const html = await dashboard.evaluate(async ({ tabId }) => chrome.runtime.sendMessage({
+    type: "GROK_EXPORTER_API_REQUEST",
+    tabId,
+    request: {
+      requestId: "html-request",
+      protocolVersion: 1,
+      path: "/rest/app-chat/conversations?pageSize=100&html=1",
+      method: "GET",
+      timeoutMs: 10_000,
+    },
+  }), { tabId: tab.tabId });
+  assert(!html.ok && html.error?.code === "GROK_NON_JSON_RESPONSE", "Bridge did not classify an HTML login response safely.");
 
   const rejected = await dashboard.evaluate(async ({ tabId }) => chrome.runtime.sendMessage({
     type: "GROK_EXPORTER_API_REQUEST",
