@@ -250,7 +250,8 @@ export class CaptureEngine {
     );
     const unchanged = marker?.validationValid === true
       && marker.conversationId === conversation.id
-      && marker.listingHash === conversation.listingHash;
+      && marker.listingHash === conversation.listingHash
+      && marker.assetStatus !== "partial";
 
     return {
       conversationId: conversation.id,

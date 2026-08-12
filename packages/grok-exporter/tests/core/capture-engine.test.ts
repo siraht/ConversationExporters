@@ -76,6 +76,28 @@ describe("capture engine", () => {
     expect(secondTransport.requests).toHaveLength(1);
   });
 
+  it("retries an unchanged conversation whose asset capture was partial", async () => {
+    const filesystem = new MemoryArchiveFileSystem();
+    await new CaptureEngine({
+      client: new GrokClient({ transport: successfulTransport(), settings }),
+      filesystem,
+      idFactory: () => "00000000-0000-4000-8000-000000000001",
+    }).run();
+    const path = "conversations/c1/complete.json";
+    const marker = JSON.parse((await filesystem.readText(path))!);
+    marker.assetStatus = "partial";
+    await filesystem.writeTextAtomic(path, JSON.stringify(marker));
+
+    const retryTransport = successfulTransport();
+    const summary = await new CaptureEngine({
+      client: new GrokClient({ transport: retryTransport, settings }),
+      filesystem,
+      idFactory: () => "00000000-0000-4000-8000-000000000002",
+    }).run();
+    expect(summary.unchangedCount).toBe(1);
+    expect(retryTransport.requests.length).toBeGreaterThan(1);
+  });
+
   it("does not write a completion marker when response validation fails twice", async () => {
     const filesystem = new MemoryArchiveFileSystem();
     const transport = new FixtureTransport(new Map([
