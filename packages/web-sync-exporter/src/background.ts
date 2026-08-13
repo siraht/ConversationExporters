@@ -116,7 +116,7 @@ async function providerTab(url: string, missing: string): Promise<chrome.tabs.Ta
 }
 
 async function pageRequest(tabId: number, operation: PageRequest["operation"], parameters?: Record<string, unknown>): Promise<unknown> {
-  const request: PageRequest = { type: "WEB_SYNC_PAGE_REQUEST", requestId: crypto.randomUUID(), operation, ...(parameters ? { parameters } : {}) };
+  const request: PageRequest = { type: "WEB_SYNC_PAGE_REQUEST_V2", requestId: crypto.randomUUID(), operation, ...(parameters ? { parameters } : {}) };
   const reply = await chrome.tabs.sendMessage<PageRequest, PageReply>(tabId, request);
   if (!reply?.ok) throw new Error(reply?.error ?? "Provider tab did not answer");
   return reply.result;

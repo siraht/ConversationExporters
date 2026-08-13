@@ -13,6 +13,7 @@ let capturedGet: CapturedRequest | undefined;
 let originalFetch: typeof window.fetch | undefined;
 const xhrStates = new WeakMap<XMLHttpRequest, { method: string; url: string; headers: Headers }>();
 const captureChannel = "conversation-exporters:ai-studio-rpc-template";
+let promptReferenceLocator: PromptReferenceLocator | null | undefined;
 
 export function installAiStudioCapture(): void {
   if (location.hostname !== "aistudio.google.com") return;
@@ -29,6 +30,13 @@ export function installAiStudioCapture(): void {
 }
 
 export async function listAiStudioPrompts(): Promise<AiStudioPromptRecord[]> {
+  const inventories = await listAiStudioPromptInventory();
+  const records: AiStudioPromptRecord[] = [];
+  for (const inventory of inventories) records.push({ id: promptIdentity(inventory), inventory, detail: await getAiStudioPromptDetail(inventory) });
+  return records;
+}
+
+export async function listAiStudioPromptInventory(): Promise<unknown[][]> {
   if (location.hostname !== "aistudio.google.com") throw new Error("wrong provider tab");
   const listTemplate = capturedList;
   const getTemplate = capturedGet;
@@ -48,21 +56,25 @@ export async function listAiStudioPrompts(): Promise<AiStudioPromptRecord[]> {
   if (!output.size) throw new Error("AI Studio returned no saved prompts");
   const inventories = [...output.values()];
   const reference = messageField(getTemplate.body, 0);
-  const locator = getTemplate.url.includes("MakerSuiteService/ResolveDriveResource") && typeof reference === "string"
+  promptReferenceLocator = getTemplate.url.includes("MakerSuiteService/ResolveDriveResource") && typeof reference === "string"
     ? locatePromptReference(inventories, reference)
     : null;
-  if (getTemplate.url.includes("MakerSuiteService/ResolveDriveResource") && !locator) {
+  if (getTemplate.url.includes("MakerSuiteService/ResolveDriveResource") && !promptReferenceLocator) {
     throw new Error("AI Studio could not match the opened prompt to its inventory record. Refresh prompt history, open a saved prompt from that list, then retry.");
   }
-  const records: AiStudioPromptRecord[] = [];
-  for (const inventory of inventories) {
-    const id = promptIdentity(inventory);
-    const detailReference = locator ? promptReferenceAt(inventory, locator) : id;
-    if (!detailReference) throw new Error(`AI Studio prompt ${id} lacks the expected Drive reference`);
-    const detail = await requestPage(getTemplate, promptRequestBody(getTemplate.body, detailReference), "prompt detail");
-    records.push({ id, inventory, detail });
+  return inventories;
+}
+
+export async function getAiStudioPromptDetail(value: unknown): Promise<unknown> {
+  if (location.hostname !== "aistudio.google.com") throw new Error("wrong provider tab");
+  if (!Array.isArray(value)) throw new Error("AI Studio prompt inventory record was malformed");
+  if (!originalFetch || !capturedGet || promptReferenceLocator === undefined) {
+    throw new Error("AI Studio prompt detail is not initialized. Refresh prompt history, open one saved prompt, then retry.");
   }
-  return records;
+  const id = promptIdentity(value);
+  const detailReference = promptReferenceLocator ? promptReferenceAt(value, promptReferenceLocator) : id;
+  if (!detailReference) throw new Error(`AI Studio prompt ${id} lacks the expected Drive reference`);
+  return await requestPage(capturedGet, promptRequestBody(capturedGet.body, detailReference), "prompt detail");
 }
 
 export function promptRequestBody(template: JsonMessage, id: string): JsonMessage {

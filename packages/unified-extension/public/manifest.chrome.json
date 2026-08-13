@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Conversation Archive",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Private, resumable archives of ChatGPT, Claude, Gemini, AI Studio, and Grok conversations.",
-  "permissions": ["alarms", "downloads", "storage", "tabs", "unlimitedStorage"],
+  "permissions": ["alarms", "downloads", "scripting", "storage", "tabs", "unlimitedStorage"],
   "optional_permissions": ["nativeMessaging"],
   "optional_host_permissions": ["http://*/*", "https://*/*"],
   "host_permissions": ["https://chatgpt.com/*", "https://claude.ai/*", "https://gemini.google.com/*", "https://aistudio.google.com/*", "https://grok.com/*", "https://assets.grok.com/*", "https://imagine-public.x.ai/*", "https://pbs.twimg.com/*", "https://video.twimg.com/*"],

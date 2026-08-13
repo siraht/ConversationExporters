@@ -50,7 +50,7 @@ export function parseGeminiChatResponse(text: string, conversationId: string, li
   return { messages, provider_raw: body, possibly_truncated: turns.length >= limit };
 }
 
-function rpcPayload(text: string, rpcId: string): unknown[] | undefined {
+export function rpcPayload(text: string, rpcId: string): unknown[] | undefined {
   const marker = `[["wrb.fr","${rpcId}"`;
   const start = text.indexOf(marker);
   if (start < 0) return undefined;

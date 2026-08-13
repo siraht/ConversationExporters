@@ -155,80 +155,426 @@ async function syncProvider(provider: DirectProvider): Promise<SyncSummary> {
 }
 
 async function syncClaude(filesystem: ArchiveFileSystem): Promise<SyncSummary> {
+  const organizations = asRecords(await pageRequest("https://claude.ai/*", "claudeAccount"));
+  await writeJson(filesystem, "source/organizations.json", organizations);
   const listing = asRecords(await pageRequest("https://claude.ai/*", "claudeList"));
-  const previous = new Map((await readJson<JsonRecord[]>(filesystem, "conversations.json", [])).flatMap((row) => typeof row.uuid === "string" ? [[row.uuid, row] as const] : []));
-  const output: JsonRecord[] = []; let fetched = 0, unchanged = 0;
+  await writeJson(filesystem, "inventory.json", { schema: "conversation-exporters/claude-web/3", organizations, conversations: listing });
+  let fetched = 0, unchanged = 0, failed = 0;
+
+  for (const organization of organizations) {
+    const organizationId = text(organization.uuid); if (!organizationId) continue;
+    const orgRoot = `organizations/${pathSegment(organizationId)}`;
+    await writeJson(filesystem, `${orgRoot}/organization.json`, organization);
+    if (Array.isArray(organization.capabilities) && !organization.capabilities.includes("chat")) {
+      await removeIfExists(filesystem, `${orgRoot}/projects/error.json`);
+      continue;
+    }
+    try {
+      const projects = asRecords(await pageRequest("https://claude.ai/*", "claudeProjects", { organizationId }));
+      await writeJson(filesystem, `${orgRoot}/projects/index.json`, projects);
+      for (const project of projects) {
+        const projectId = text(project.uuid) ?? text(project.id); if (!projectId) continue;
+        const projectRoot = `${orgRoot}/projects/${pathSegment(projectId)}`;
+        try {
+          const [detail, docs, conversations] = await Promise.all([
+            pageRequest("https://claude.ai/*", "claudeProjectDetail", { organizationId, projectId }),
+            pageRequest("https://claude.ai/*", "claudeProjectDocs", { organizationId, projectId }),
+            pageRequest("https://claude.ai/*", "claudeProjectConversations", { organizationId, projectId }),
+          ]);
+          await writeJson(filesystem, `${projectRoot}/project.json`, detail);
+          await writeJson(filesystem, `${projectRoot}/docs.json`, docs);
+          await writeJson(filesystem, `${projectRoot}/conversations.json`, conversations);
+          const instructions = text(asRecordOrEmpty(detail).prompt_template);
+          if (instructions) await filesystem.writeTextAtomic(`${projectRoot}/instructions.md`, instructions);
+          for (const [index, doc] of asRecordsOrEmpty(docs).entries()) {
+            await writeJson(filesystem, `${projectRoot}/docs/${String(index + 1).padStart(4, "0")}-${pathSegment(text(doc.uuid) ?? text(doc.id) ?? "document")}.json`, doc);
+            if (typeof doc.content === "string") await filesystem.writeTextAtomic(`${projectRoot}/docs/${String(index + 1).padStart(4, "0")}-${pathSegment(text(doc.name) ?? text(doc.file_name) ?? "document")}.content`, doc.content);
+          }
+          await writeJson(filesystem, `${projectRoot}/complete.json`, { schemaVersion: 1, completedAt: new Date().toISOString(), docs: asRecordsOrEmpty(docs).length, conversations: asRecordsOrEmpty(conversations).length });
+          await removeIfExists(filesystem, `${projectRoot}/error.json`);
+        } catch (error) {
+          failed += 1;
+          await writeJson(filesystem, `${projectRoot}/error.json`, { error: messageOf(error), failedAt: new Date().toISOString() });
+        }
+      }
+    } catch (error) {
+      failed += 1;
+      await writeJson(filesystem, `${orgRoot}/projects/error.json`, { error: messageOf(error), failedAt: new Date().toISOString() });
+    }
+  }
+
   for (const row of listing) {
     const id = text(row.uuid), organizationId = text(row._organization_uuid); if (!id || !organizationId) continue;
-    const prior = previous.get(id);
-    if (prior && prior.updated_at === row.updated_at) { output.push(prior); previous.delete(id); unchanged += 1; continue; }
-    output.push({ ...asRecord(await pageRequest("https://claude.ai/*", "claudeDetail", { organizationId, conversationId: id })), _organization_uuid: organizationId });
-    previous.delete(id); fetched += 1; await delay(150);
+    const root = `conversations/${pathSegment(id)}`;
+    const prior = await readJson<JsonRecord>(filesystem, `${root}/metadata.json`, {});
+    if (prior.updated_at === row.updated_at && await filesystem.exists(`${root}/complete.json`)) { unchanged += 1; continue; }
+    try {
+      const detail = { ...asRecord(await pageRequest("https://claude.ai/*", "claudeDetail", { organizationId, conversationId: id })), _organization_uuid: organizationId };
+      await writeJson(filesystem, `${root}/metadata.json`, row);
+      await writeJson(filesystem, `${root}/conversation.json`, detail);
+      const files = claudeFiles(detail);
+      const assetManifest: JsonRecord[] = [];
+      for (const [index, file] of files.entries()) {
+        try {
+          const path = `${root}/assets/${String(index + 1).padStart(4, "0")}-${pathSegment(file.name)}`;
+          const response = await storeProviderAsset(filesystem, path, "https://claude.ai/*", "claudeFile", { organizationId, conversationId: id, ...(file.fileUuid ? { fileUuid: file.fileUuid, previewUrl: file.previewUrl } : { sandboxPath: file.sandboxPath }) });
+          assetManifest.push({ ...file, path, bytes: response.size, contentType: response.contentType, sourceVariant: response.variant, hash: response.hash });
+        } catch (error) {
+          assetManifest.push({ ...file, error: messageOf(error) });
+        }
+      }
+      await writeJson(filesystem, `${root}/assets.json`, assetManifest);
+      const sourceHash = await sha256Hex(JSON.stringify(detail));
+      const assetFailures = assetManifest.filter((item) => item.error).length;
+      const marker = assetFailures ? "incomplete" : "complete";
+      await writeJson(filesystem, `${root}/${marker}.json`, { schemaVersion: 1, sourceHash, assets: assetManifest.length, failedAssets: assetFailures, completedAt: new Date().toISOString() });
+      await removeIfExists(filesystem, `${root}/${assetFailures ? "complete" : "incomplete"}.json`);
+      await removeIfExists(filesystem, `${root}/error.json`);
+      if (assetFailures) failed += 1;
+      fetched += 1;
+    } catch (error) {
+      failed += 1;
+      await writeJson(filesystem, `${root}/error.json`, { error: messageOf(error), failedAt: new Date().toISOString() });
+    }
+    await delay(150);
   }
-  const retained = previous.size; output.push(...previous.values()); output.sort(by("uuid"));
-  await filesystem.writeTextAtomic("conversations.json", JSON.stringify(output));
-  return { provider: "claude", discovered: listing.length, fetched, unchanged, retained, failed: 0 };
+  if (await writeValidation(filesystem, "claude", listing.length, /^conversations\/[^/]+\/complete\.json$/)) {
+    await removeIfExists(filesystem, "conversations.json");
+  }
+  return { provider: "claude", discovered: listing.length, fetched, unchanged, retained: 0, failed };
 }
 
 async function syncGemini(filesystem: ArchiveFileSystem): Promise<SyncSummary> {
-  const listing = asRecords(await pageRequest("https://gemini.google.com/*", "geminiList"));
-  const document = await readJson<{ conversations: JsonRecord[] }>(filesystem, "conversations.json", { conversations: [] });
-  const previous = new Map(document.conversations.flatMap((row) => typeof row.id === "string" ? [[row.id, row] as const] : []));
-  const output: JsonRecord[] = []; let fetched = 0, unchanged = 0, failed = 0;
-  for (const row of listing) {
-    const id = text(row.id); if (!id) continue; const prior = previous.get(id);
-    if (prior && prior.updated_at === row.updated_at) { output.push(prior); previous.delete(id); unchanged += 1; continue; }
+  const liveListing = asRecords(await pageRequest("https://gemini.google.com/*", "geminiList"));
+  const priorInventory = asRecordsOrEmpty((await readJson<JsonRecord>(filesystem, "inventory.json", {})).conversations);
+  const legacy = await readJson<unknown>(filesystem, "conversations.json", {});
+  const legacyListing = asRecordsOrEmpty(asRecordOrEmpty(legacy).conversations);
+  const listingById = new Map<string, JsonRecord>();
+  for (const row of [...liveListing, ...priorInventory, ...legacyListing]) {
+    const id = text(row.id);
+    if (id && !listingById.has(id)) listingById.set(id, { id, title: text(row.title) ?? "Untitled", updated_at: row.updated_at ?? null });
+  }
+  const listing = [...listingById.values()];
+  await writeJson(filesystem, "inventory.json", {
+    schema: "conversation-exporters/gemini-web/3",
+    sourceListingCount: liveListing.length,
+    retainedListingCount: listing.length - liveListing.length,
+    conversations: listing,
+  });
+  await writeJson(filesystem, "source/account.json", await pageRequest("https://gemini.google.com/*", "geminiAccount"));
+  let fetched = 0, unchanged = 0, failed = 0;
+  try {
+    const gems = asRecord(await pageRequest("https://gemini.google.com/*", "geminiGems"));
+    await writeJson(filesystem, "gems/index.json", gems.provider_raw);
+    for (const record of asRecordsOrEmpty(gems.gems)) {
+      const id = text(record.id); if (!id) continue;
+      const root = `gems/${pathSegment(id)}`;
+      await writeJson(filesystem, `${root}/gem.json`, record);
+      await writeJson(filesystem, `${root}/complete.json`, { schemaVersion: 1, sourceHash: await sha256Hex(JSON.stringify(record)), completedAt: new Date().toISOString() });
+    }
+    await removeIfExists(filesystem, "gems/error.json");
+  } catch (error) {
+    failed += 1;
+    await writeJson(filesystem, "gems/error.json", { error: messageOf(error), failedAt: new Date().toISOString() });
+  }
+  await forEachConcurrent(listing, 2, async (row) => {
+    const id = text(row.id); if (!id) return;
+    const root = `conversations/${pathSegment(id)}`;
+    const prior = await readJson<JsonRecord>(filesystem, `${root}/metadata.json`, {});
+    if (prior.updated_at === row.updated_at && await filesystem.exists(`${root}/complete.json`)) { unchanged += 1; return; }
     try {
       const detail = asRecord(await pageRequest("https://gemini.google.com/*", "geminiDetail", { conversationId: id }));
       if (!Array.isArray(detail.messages) || !detail.messages.length) throw new Error("Gemini rendered no messages for a listed conversation");
-      output.push({ ...row, ...detail }); previous.delete(id); fetched += 1;
-    } catch { failed += 1; if (prior) { output.push(prior); previous.delete(id); } }
+      const record = { ...row, ...detail };
+      await writeJson(filesystem, `${root}/metadata.json`, row);
+      await writeJson(filesystem, `${root}/conversation.json`, record);
+      const assets = providerAssetUrls(detail);
+      const assetManifest = await downloadProviderAssets(filesystem, root, assets, "https://gemini.google.com/*", "geminiAsset");
+      await writeJson(filesystem, `${root}/assets.json`, assetManifest);
+      const incomplete = detail.possibly_truncated === true || assetManifest.some((asset) => asset.error);
+      await writeJson(filesystem, `${root}/${incomplete ? "incomplete" : "complete"}.json`, { schemaVersion: 1, sourceHash: await sha256Hex(JSON.stringify(detail)), assets: assetManifest.length, failedAssets: assetManifest.filter((asset) => asset.error).length, possiblyTruncated: detail.possibly_truncated === true, completedAt: new Date().toISOString() });
+      await removeIfExists(filesystem, `${root}/${incomplete ? "complete" : "incomplete"}.json`);
+      await removeIfExists(filesystem, `${root}/error.json`);
+      if (incomplete) failed += 1;
+      fetched += 1;
+    } catch (error) {
+      failed += 1;
+      await writeJson(filesystem, `${root}/error.json`, { error: messageOf(error), failedAt: new Date().toISOString() });
+    }
     await delay(250);
+  });
+  if (await writeValidation(filesystem, "gemini", listing.length, /^conversations\/[^/]+\/complete\.json$/)) {
+    await removeIfExists(filesystem, "conversations.json");
   }
-  const retained = previous.size; output.push(...previous.values()); output.sort(by("id"));
-  await filesystem.writeTextAtomic("conversations.json", JSON.stringify({ conversations: output }));
-  return { provider: "gemini", discovered: listing.length, fetched, unchanged, retained, failed };
+  return { provider: "gemini", discovered: listing.length, fetched, unchanged, retained: 0, failed };
 }
 
 async function syncAiStudio(filesystem: ArchiveFileSystem): Promise<SyncSummary> {
-  const prompts = asRecords(await pageRequest("https://aistudio.google.com/*", "aiStudioList"));
-  const prior = await readJson<{ prompts: JsonRecord[] }>(filesystem, "prompts.json", { prompts: [] });
-  const previous = new Map(prior.prompts.flatMap((row) => typeof row.id === "string" ? [[row.id, row] as const] : []));
-  const output: JsonRecord[] = []; let fetched = 0, unchanged = 0;
+  const inventoryRows = asArrays(await pageRequest("https://aistudio.google.com/*", "aiStudioInventory"));
+  const prompts = inventoryRows.map((inventory) => ({ id: text(inventory[0]), inventory }));
+  await writeJson(filesystem, "inventory.json", { schema: "conversation-exporters/ai-studio-web/3", prompts });
+  let fetched = 0, unchanged = 0, failed = 0;
   for (const raw of prompts) {
-    const id = text(raw.id); if (!id || !Array.isArray(raw.inventory) || !("detail" in raw)) continue;
-    const hash = await sha256Hex(JSON.stringify({ inventory: raw.inventory, detail: raw.detail })); const old = previous.get(id);
-    if (old?.hash === hash) { output.push(old); unchanged += 1; }
-    else { const metadata = Array.isArray(raw.inventory[4]) ? raw.inventory[4] : []; output.push({ id, title: text(metadata[0]) || text(metadata[1]) || "Untitled", hash, inventory: raw.inventory, detail: raw.detail }); fetched += 1; }
-    previous.delete(id);
+    const id = text(raw.id); if (!id) continue;
+    const root = `prompts/${pathSegment(id)}`;
+    try {
+      const detail = await pageRequest("https://aistudio.google.com/*", "aiStudioDetail", { inventory: raw.inventory });
+      const hash = await sha256Hex(JSON.stringify({ inventory: raw.inventory, detail }));
+      const complete = await readJson<JsonRecord>(filesystem, `${root}/complete.json`, {});
+      if (complete.sourceHash === hash && complete.assetDiscoveryVersion === 2) { unchanged += 1; await removeIfExists(filesystem, `${root}/error.json`); continue; }
+      const metadata = Array.isArray(raw.inventory[4]) ? raw.inventory[4] : [];
+      const record = { id, title: text(metadata[0]) || text(metadata[1]) || "Untitled", hash, inventory: raw.inventory, detail };
+      await writeJson(filesystem, `${root}/prompt.json`, record);
+      const assetSource = { ...raw, detail };
+      const ownDriveId = id.split("/").at(-1);
+      const driveIds = providerDriveIds(assetSource).filter((candidate) => candidate !== ownDriveId);
+      const urls = providerAssetUrls(assetSource);
+      const assetManifest: JsonRecord[] = [];
+      for (const [index, driveId] of driveIds.entries()) {
+        try {
+          const path = `${root}/assets/drive-${String(index + 1).padStart(4, "0")}-${pathSegment(driveId)}`;
+          const response = await storeProviderAsset(filesystem, path, "https://aistudio.google.com/*", "aiStudioAsset", { driveId });
+          assetManifest.push({ driveId, path, bytes: response.size, contentType: response.contentType, hash: response.hash });
+        } catch (error) { assetManifest.push({ driveId, error: messageOf(error) }); }
+      }
+      assetManifest.push(...await downloadProviderAssets(filesystem, root, urls, "https://aistudio.google.com/*", "aiStudioAsset", assetManifest.length));
+      await writeJson(filesystem, `${root}/assets.json`, assetManifest);
+      const assetFailures = assetManifest.filter((asset) => asset.error).length;
+      await writeJson(filesystem, `${root}/${assetFailures ? "incomplete" : "complete"}.json`, { schemaVersion: 1, assetDiscoveryVersion: 2, sourceHash: hash, assets: assetManifest.length, failedAssets: assetFailures, completedAt: new Date().toISOString() });
+      await removeIfExists(filesystem, `${root}/${assetFailures ? "complete" : "incomplete"}.json`);
+      await removeIfExists(filesystem, `${root}/error.json`);
+      if (assetFailures) failed += 1;
+      fetched += 1;
+    } catch (error) {
+      failed += 1;
+      await writeJson(filesystem, `${root}/error.json`, { error: messageOf(error), failedAt: new Date().toISOString() });
+    }
   }
-  const retained = previous.size; output.push(...previous.values()); output.sort(by("id"));
-  await filesystem.writeTextAtomic("prompts.json", JSON.stringify({ schema: "conversation-exporters/ai-studio-web/2", prompts: output }));
-  return { provider: "ai-studio", discovered: prompts.length, fetched, unchanged, retained, failed: 0 };
+  if (await writeValidation(filesystem, "ai-studio", prompts.length, /^prompts\/[^/]+\/complete\.json$/)) {
+    await removeIfExists(filesystem, "prompts.json");
+  }
+  return { provider: "ai-studio", discovered: prompts.length, fetched, unchanged, retained: 0, failed };
 }
 
 async function pageRequest(pattern: string, operation: PageRequest["operation"], parameters?: Record<string, unknown>): Promise<unknown> {
-  const tabs = (await chrome.tabs.query({ url: pattern }))
-    .filter((tab): tab is chrome.tabs.Tab & { id: number } => tab.id !== undefined)
-    .sort((left, right) => (right.lastAccessed ?? 0) - (left.lastAccessed ?? 0));
+  const tabs = await providerTabs(pattern);
   if (!tabs.length) throw new Error(`Open a signed-in ${new URL(pattern.replace("*", "")).hostname} tab`);
-  const request: PageRequest = { type: "WEB_SYNC_PAGE_REQUEST", requestId: crypto.randomUUID(), operation, ...(parameters ? { parameters } : {}) };
   let lastError = "Provider tab did not answer";
   for (const tab of tabs) {
     try {
-      const reply = await chrome.tabs.sendMessage<PageRequest, PageReply>(tab.id, request);
-      if (reply?.ok) return reply.result;
-      lastError = reply?.error ?? lastError;
+      return await pageRequestOnTab(tab.id, operation, parameters);
     } catch (error) { lastError = messageOf(error); }
   }
   throw new Error(lastError);
 }
 
+async function providerTabs(pattern: string): Promise<Array<chrome.tabs.Tab & { id: number }>> {
+  return (await chrome.tabs.query({ url: pattern }))
+    .filter((tab): tab is chrome.tabs.Tab & { id: number } => tab.id !== undefined)
+    .sort((left, right) => (right.lastAccessed ?? 0) - (left.lastAccessed ?? 0));
+}
+
+async function pageRequestOnTab(tabId: number, operation: PageRequest["operation"], parameters?: Record<string, unknown>): Promise<unknown> {
+  const request: PageRequest = { type: "WEB_SYNC_PAGE_REQUEST_V2", requestId: crypto.randomUUID(), operation, ...(parameters ? { parameters } : {}) };
+  let reply: PageReply;
+  try { reply = await chrome.tabs.sendMessage<PageRequest, PageReply>(tabId, request); }
+  catch {
+    await installProviderBridge(tabId);
+    reply = await chrome.tabs.sendMessage<PageRequest, PageReply>(tabId, request);
+  }
+  if (!reply?.ok) throw new Error(reply?.error ?? "Provider tab did not answer");
+  return reply.result;
+}
+
+async function installProviderBridge(tabId: number): Promise<void> {
+  await chrome.scripting.executeScript({ target: { tabId, allFrames: false }, files: ["web-content-relay.js"] });
+  await chrome.scripting.executeScript({ target: { tabId, allFrames: false }, files: ["web-page-bridge.js"], world: "MAIN" });
+}
+
 async function readJson<T>(filesystem: ArchiveFileSystem, path: string, fallback: T): Promise<T> { const value = await filesystem.readText(path); return value ? JSON.parse(value) as T : fallback; }
+async function writeJson(filesystem: ArchiveFileSystem, path: string, value: unknown): Promise<void> { await filesystem.writeTextAtomic(path, JSON.stringify(value)); }
+async function removeIfExists(filesystem: ArchiveFileSystem, path: string): Promise<void> { if (await filesystem.exists(path)) await filesystem.remove(path); }
 function asRecords(value: unknown): JsonRecord[] { if (!Array.isArray(value)) throw new Error("Provider inventory was malformed"); return value.filter((row): row is JsonRecord => Boolean(row) && typeof row === "object"); }
+function asRecordsOrEmpty(value: unknown): JsonRecord[] { return Array.isArray(value) ? value.filter((row): row is JsonRecord => Boolean(row) && typeof row === "object" && !Array.isArray(row)) : []; }
+function asArrays(value: unknown): unknown[][] { if (!Array.isArray(value)) throw new Error("Provider inventory was malformed"); return value.filter((row): row is unknown[] => Array.isArray(row)); }
 function asRecord(value: unknown): JsonRecord { if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Provider detail was malformed"); return value as JsonRecord; }
+function asRecordOrEmpty(value: unknown): JsonRecord { return value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : {}; }
 function text(value: unknown): string | undefined { return typeof value === "string" && value ? value : undefined; }
-function by(key: string) { return (a: JsonRecord, b: JsonRecord) => String(a[key] ?? "").localeCompare(String(b[key] ?? "")); }
 function delay(ms: number) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+async function forEachConcurrent<T>(items: readonly T[], limit: number, operation: (item: T) => Promise<void>): Promise<void> {
+  let cursor = 0;
+  async function worker(): Promise<void> {
+    while (cursor < items.length) {
+      const item = items[cursor++];
+      if (item !== undefined) await operation(item);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => worker()));
+}
 async function runExclusive<T>(operation: () => Promise<T>): Promise<T> { if (active) throw new Error("A sync is already running"); const promise = operation(); active = promise; try { return await promise; } finally { active = undefined; } }
 function messageOf(error: unknown): string { return error instanceof Error ? error.message : "Operation failed"; }
+
+interface ClaudeFileReference extends JsonRecord { name: string; fileUuid?: string; sandboxPath?: string; previewUrl?: string }
+
+function claudeFiles(value: unknown): ClaudeFileReference[] {
+  const output = new Map<string, ClaudeFileReference>();
+  walk(value, (item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return;
+    const record = item as JsonRecord;
+    const sandboxPath = typeof record.path === "string" && record.path.startsWith("/mnt/") ? record.path : undefined;
+    const fileUuid = (record.file_kind === "image" || record.kind === "image") ? text(record.file_uuid) ?? text(record.uuid) : undefined;
+    const fileRecord = typeof record.file_name === "string" || typeof record.file_kind === "string" || typeof record.size_bytes === "number" || typeof record.file_uuid === "string";
+    if ((sandboxPath && fileRecord) || fileUuid) {
+      const name = text(record.file_name) ?? text(record.filename) ?? sandboxPath?.split("/").at(-1) ?? fileUuid ?? "file";
+      const key = sandboxPath ? `path:${sandboxPath}` : `uuid:${fileUuid}`;
+      output.set(key, { name, ...(sandboxPath ? { sandboxPath } : {}), ...(fileUuid ? { fileUuid } : {}), ...(typeof record.preview_url === "string" ? { previewUrl: record.preview_url } : {}), providerMetadata: record });
+    }
+    if (record.name === "present_files") {
+      walk(record, (candidate) => {
+        if (typeof candidate !== "string" || !candidate.startsWith("/mnt/")) return;
+        output.set(`path:${candidate}`, { name: candidate.split("/").at(-1) ?? "file", sandboxPath: candidate });
+      });
+    }
+  });
+  return [...output.values()];
+}
+
+function providerAssetUrls(value: unknown): string[] {
+  const urls = new Set<string>();
+  walk(value, (candidate) => {
+    if (typeof candidate !== "string" || !candidate.startsWith("https://")) return;
+    try {
+      const url = new URL(candidate);
+      const allowed = ["googleusercontent.com", "googleapis.com"].some((suffix) => url.hostname === suffix || url.hostname.endsWith(`.${suffix}`));
+      if (allowed && !/\/a\/(?:ACg|AOh)[A-Za-z0-9_-]+(?:=s\d+)?$/.test(url.pathname)) urls.add(url.href);
+    } catch { /* malformed provider value */ }
+  });
+  return [...urls].sort();
+}
+
+function providerDriveIds(value: unknown): string[] {
+  const ids = new Set<string>();
+  walk(value, (candidate) => {
+    if (typeof candidate !== "string") return;
+    if (/^[A-Za-z0-9_-]{25,50}$/.test(candidate) && /[A-Z]/.test(candidate) && /[a-z]/.test(candidate) && /[0-9]/.test(candidate)) ids.add(candidate);
+    if (!/^https:\/\/(?:drive|docs)\.google\.com\//.test(candidate)) return;
+    for (const match of candidate.matchAll(/(?:\/d\/|[?&]id=)([A-Za-z0-9_-]{20,100})/g)) if (match[1]) ids.add(match[1]);
+  });
+  return [...ids].sort();
+}
+
+async function downloadProviderAssets(filesystem: ArchiveFileSystem, root: string, urls: string[], pattern: string, operation: "geminiAsset" | "aiStudioAsset", start = 0): Promise<JsonRecord[]> {
+  const output: JsonRecord[] = [];
+  for (const [offset, url] of urls.entries()) {
+    try {
+      const fallback = new URL(url).pathname.split("/").filter(Boolean).at(-1) ?? `asset-${offset + 1}`;
+      const path = `${root}/assets/${String(start + offset + 1).padStart(4, "0")}-${pathSegment(fallback)}`;
+      const response = await storeProviderAsset(filesystem, path, pattern, operation, { url });
+      output.push({ url, path, bytes: response.size, contentType: response.contentType, hash: response.hash });
+    } catch (error) { output.push({ url, error: messageOf(error) }); }
+  }
+  return output;
+}
+
+async function writeValidation(filesystem: ArchiveFileSystem, provider: DirectProvider, discovered: number, completePattern: RegExp): Promise<boolean> {
+  const paths = await filesystem.listPaths();
+  const complete = paths.filter((path) => completePattern.test(path)).length;
+  const incomplete = paths.filter((path) => /\/(?:incomplete|error)\.json$/.test(path)).length;
+  const valid = complete === discovered && incomplete === 0;
+  await writeJson(filesystem, "validation.json", { schemaVersion: 1, provider, discovered, complete, incomplete, valid, checkedAt: new Date().toISOString() });
+  return valid;
+}
+
+async function storeProviderAsset(filesystem: ArchiveFileSystem, path: string, pattern: string, operation: "claudeFile" | "geminiAsset" | "aiStudioAsset", parameters: JsonRecord): Promise<{ size: number; contentType: unknown; variant: unknown; hash: string }> {
+  const directUrl = directProviderAssetUrl(operation, parameters);
+  if (directUrl) {
+    const origin = `${new URL(directUrl).origin}/*`;
+    if (!await chrome.permissions.contains({ origins: [origin] })) {
+      throw new Error(`Media download permission is missing for ${new URL(directUrl).hostname}; start the sync from the dashboard and approve it.`);
+    }
+    const response = await fetchProviderAsset(directUrl);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    await filesystem.writeBytesAtomic(path, bytes);
+    return { size: bytes.byteLength, contentType: response.headers.get("content-type"), variant: "provider", hash: await sha256Hex(bytes) };
+  }
+  const [tab] = await providerTabs(pattern);
+  if (!tab) throw new Error(`Open a signed-in ${new URL(pattern.replace("*", "")).hostname} tab`);
+  const begin = asRecord(await pageRequestOnTab(tab.id, operation, { ...parameters, phase: "begin" }));
+  const transferId = text(begin.transferId); const size = typeof begin.size === "number" ? begin.size : NaN;
+  if (!transferId || !Number.isSafeInteger(size) || size < 0) throw new Error("Provider asset transfer was malformed");
+  try {
+    async function* chunks(): AsyncIterable<Uint8Array> {
+      for (let offset = 0; offset < size; offset += 262_144) {
+        const result = asRecord(await pageRequestOnTab(tab.id, operation, { phase: "chunk", transferId, offset, length: Math.min(262_144, size - offset) }));
+        yield decodeBase64(text(result.base64) ?? "");
+      }
+    }
+    await filesystem.writeByteChunksAtomic(path, chunks());
+    const bytes = await filesystem.readBytes(path);
+    if (!bytes || bytes.byteLength !== size) throw new Error("Provider asset size did not match the transfer manifest");
+    return { size, contentType: begin.contentType, variant: begin.variant, hash: await sha256Hex(bytes) };
+  } finally {
+    await pageRequestOnTab(tab.id, operation, { phase: "end", transferId }).catch(() => undefined);
+  }
+}
+
+async function fetchProviderAsset(url: string): Promise<Response> {
+  let lastError = "Provider asset request failed";
+  for (let attempt = 0; attempt < 7; attempt += 1) {
+    try {
+      const response = await fetch(url, { credentials: "include", headers: { accept: "*/*" }, signal: AbortSignal.timeout(30_000) });
+      if (response.ok) return response;
+      lastError = `Provider asset request failed (${response.status})`;
+      if (response.status !== 429 && response.status < 500) throw new Error(lastError);
+      const retryAfter = retryAfterMilliseconds(response.headers.get("retry-after"));
+      await response.body?.cancel().catch(() => undefined);
+      if (attempt < 6) await delay(retryAfter ?? Math.min(1_000 * (2 ** attempt), 15_000));
+    } catch (error) {
+      lastError = messageOf(error);
+      if (attempt === 6) break;
+      await delay(Math.min(1_000 * (2 ** attempt), 15_000));
+    }
+  }
+  throw new Error(lastError);
+}
+
+function retryAfterMilliseconds(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1_000, 60_000);
+  const at = Date.parse(value);
+  return Number.isFinite(at) ? Math.min(Math.max(0, at - Date.now()), 60_000) : undefined;
+}
+
+function directProviderAssetUrl(operation: "claudeFile" | "geminiAsset" | "aiStudioAsset", parameters: JsonRecord): string | undefined {
+  if (operation === "claudeFile") return undefined;
+  if (typeof parameters.url === "string") {
+    const url = new URL(parameters.url);
+    const allowed = ["googleusercontent.com", "googleapis.com", "usercontent.google.com"].some((suffix) => url.hostname === suffix || url.hostname.endsWith(`.${suffix}`));
+    if (url.protocol !== "https:" || !allowed) throw new Error("Provider asset URL is not allowed");
+    return url.href;
+  }
+  if (operation === "aiStudioAsset" && typeof parameters.driveId === "string") {
+    const driveId = parameters.driveId;
+    if (!/^[A-Za-z0-9_-]{20,100}$/.test(driveId)) throw new Error("Invalid Drive file ID");
+    return `https://drive.google.com/uc?export=download&id=${encodeURIComponent(driveId)}`;
+  }
+  return undefined;
+}
+
+function walk(value: unknown, visit: (value: unknown) => void): void {
+  visit(value);
+  if (Array.isArray(value)) for (const child of value) walk(child, visit);
+  else if (value && typeof value === "object") for (const child of Object.values(value as JsonRecord)) walk(child, visit);
+}
+
+function pathSegment(value: string): string {
+  const normalized = value.normalize("NFKC").replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 160);
+  return normalized || "item";
+}
+
+function decodeBase64(value: string): Uint8Array {
+  const binary = atob(value); const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes;
+}

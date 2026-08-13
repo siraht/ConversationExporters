@@ -52,13 +52,39 @@ async function summarizeArchive(namespace: ArchiveNamespace, entries: BrowserArc
   const report = objectValue(await readObject(entries.find((entry) => entry.path === "sync-report.json")));
   const result = objectValue(report?.summary);
   const capturedFromReport = numeric(result?.fetched) + numeric(result?.unchanged) + numeric(result?.retained);
+  const inventory = objectValue(await readObject(entries.find((entry) => entry.path === "inventory.json")));
   if (namespace === "google-ai-studio") {
     const fallback = objectValue(await readObject(entries.find((entry) => entry.path === "prompts.json")));
-    return { ...base, recordKind: "prompt", captured: capturedFromReport || arrayLength(fallback?.prompts) };
+    return {
+      ...base,
+      recordKind: "prompt",
+      captured: matchingPaths(entries, /^prompts\/[^/]+\/complete\.json$/) || capturedFromReport || arrayLength(fallback?.prompts),
+      ...(arrayLength(inventory?.prompts) ? { discovered: arrayLength(inventory?.prompts) } : {}),
+      assets: matchingPaths(entries, /^prompts\/[^/]+\/assets\/[^/]+$/),
+    };
+  }
+  if (namespace === "claude-web") {
+    const legacy = await readObject(entries.find((entry) => entry.path === "conversations.json"));
+    return {
+      ...base,
+      recordKind: "chat",
+      captured: matchingPaths(entries, /^conversations\/[^/]+\/complete\.json$/) || capturedFromReport || (Array.isArray(legacy) ? legacy.length : 0),
+      ...(arrayLength(inventory?.conversations) ? { discovered: arrayLength(inventory?.conversations) } : {}),
+      workspaces: matchingPaths(entries, /^organizations\/[^/]+\/organization\.json$/),
+      projects: matchingPaths(entries, /^organizations\/[^/]+\/projects\/[^/]+\/complete\.json$/),
+      assets: matchingPaths(entries, /^conversations\/[^/]+\/assets\/[^/]+$/),
+    };
   }
   const fallback = await readObject(entries.find((entry) => entry.path === "conversations.json"));
   const conversations = Array.isArray(fallback) ? fallback.length : arrayLength(objectValue(fallback)?.conversations);
-  return { ...base, recordKind: "chat", captured: capturedFromReport || conversations };
+  return {
+    ...base,
+    recordKind: "chat",
+    captured: matchingPaths(entries, /^conversations\/[^/]+\/complete\.json$/) || capturedFromReport || conversations,
+    ...(arrayLength(inventory?.conversations) ? { discovered: arrayLength(inventory?.conversations) } : {}),
+    projects: matchingPaths(entries, /^gems\/[^/]+\/complete\.json$/),
+    assets: matchingPaths(entries, /^conversations\/[^/]+\/assets\/[^/]+$/),
+  };
 }
 
 function matchingPaths(entries: BrowserArchiveEntry[], pattern: RegExp): number {

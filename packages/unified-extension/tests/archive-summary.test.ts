@@ -36,4 +36,24 @@ describe("browser archive summaries", () => {
     expect(summaries.find((summary) => summary.namespace === "claude-web")?.captured).toBe(11);
     expect(summaries.find((summary) => summary.namespace === "google-ai-studio")?.captured).toBe(53);
   });
+
+  it("reports complete provider-specific records and assets from the full archive layout", async () => {
+    const summaries = await summarizeBrowserArchives([
+      entry("claude-web", "inventory.json", { conversations: [{}, {}] }),
+      entry("claude-web", "organizations/org/organization.json"),
+      entry("claude-web", "organizations/org/projects/project/complete.json"),
+      entry("claude-web", "conversations/chat/complete.json"),
+      entry("claude-web", "conversations/chat/assets/input.pdf"),
+      entry("gemini-web", "inventory.json", { conversations: [{}, {}, {}] }),
+      entry("gemini-web", "gems/gem/complete.json"),
+      entry("gemini-web", "conversations/chat/complete.json"),
+      entry("gemini-web", "conversations/chat/assets/image.png"),
+      entry("google-ai-studio", "inventory.json", { prompts: [{}, {}] }),
+      entry("google-ai-studio", "prompts/prompt/complete.json"),
+      entry("google-ai-studio", "prompts/prompt/assets/reference.pdf"),
+    ]);
+    expect(summaries.find((summary) => summary.namespace === "claude-web")).toMatchObject({ captured: 1, discovered: 2, workspaces: 1, projects: 1, assets: 1 });
+    expect(summaries.find((summary) => summary.namespace === "gemini-web")).toMatchObject({ captured: 1, discovered: 3, projects: 1, assets: 1 });
+    expect(summaries.find((summary) => summary.namespace === "google-ai-studio")).toMatchObject({ captured: 1, discovered: 2, assets: 1 });
+  });
 });
