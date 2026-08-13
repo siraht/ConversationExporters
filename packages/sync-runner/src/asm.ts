@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { stat } from "node:fs/promises";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, extname, join, relative, resolve } from "node:path";
 import type { ImportResult, Provider, SyncConfig } from "./types.js";
 
 interface CommandResult {
@@ -72,7 +73,7 @@ export async function replicateWebSources(
   const eligible: Array<{ source: string; provider: Provider; relativePath: string }> = [];
   for (const item of sources) {
     const source = resolve(item.source);
-    const relativePath = relative(config.dataRoot, source).replaceAll("\\", "/");
+    const relativePath = safeRelativePath(relative(config.dataRoot, source).replaceAll("\\", "/"));
     const isPrivateSource = source.startsWith(`${liveRoot}/`) || source.startsWith(`${incomingRoot}/`);
     if (item.provider && isPrivateSource) eligible.push({ source, provider: item.provider, relativePath });
   }
@@ -125,6 +126,17 @@ export async function replicateWebSources(
     remoteIndexed = true;
   }
   return { mirroredSources, remoteNewVersions, remoteIndexed };
+}
+
+function safeRelativePath(value: string): string {
+  if (/^[A-Za-z0-9._/-]+$/.test(value)) return value;
+  const parts = value.split("/");
+  const filename = parts.pop() ?? "source";
+  const extension = extname(filename).replace(/[^A-Za-z0-9.]/g, "");
+  const stem = filename.slice(0, filename.length - extension.length).replace(/[^A-Za-z0-9._-]/g, "_");
+  const digest = createHash("sha256").update(value).digest("hex").slice(0, 12);
+  const directories = parts.map((part) => part.replace(/[^A-Za-z0-9._-]/g, "_"));
+  return [...directories, `${stem}-${digest}${extension}`].join("/");
 }
 
 async function run(command: string, arguments_: string[]): Promise<CommandResult> {
