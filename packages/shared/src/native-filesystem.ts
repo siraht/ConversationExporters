@@ -8,7 +8,7 @@ interface NativeReply {
   error?: string;
 }
 
-export type NativeArchiveNamespace = "chatgpt-web" | "claude-web" | "gemini-web" | "grok-web";
+export type NativeArchiveNamespace = "chatgpt-web" | "claude-web" | "gemini-web" | "google-ai-studio" | "grok-web";
 
 export class NativeArchiveFileSystem implements ArchiveFileSystem {
   private readonly port = chrome.runtime.connectNative("com.conversation_exporters.archive");

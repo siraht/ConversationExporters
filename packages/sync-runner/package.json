@@ -10,6 +10,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "check": "npm run typecheck && npm test && npm run build",
+    "install:native": "sh scripts/install-native-host.sh",
     "install:systemd": "sh scripts/install-systemd.sh",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"

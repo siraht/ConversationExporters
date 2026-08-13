@@ -1,0 +1,9 @@
+{
+  "name": "com.conversation_exporters.archive",
+  "description": "Writes ConversationExporters archives to private local provider directories.",
+  "path": "__HOST_PATH__",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://__CHROME_EXTENSION_ID__/"
+  ]
+}

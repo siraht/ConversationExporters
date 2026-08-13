@@ -8,7 +8,7 @@ import { dirname, join, relative, resolve } from "node:path";
 interface RequestMessage {
   id: string;
   operation: string;
-  namespace: "chatgpt-web" | "claude-web" | "gemini-web" | "grok-web";
+  namespace: "chatgpt-web" | "claude-web" | "gemini-web" | "google-ai-studio" | "grok-web";
   path?: string;
   prefix?: string;
   writeId?: string;
@@ -145,7 +145,7 @@ async function execute(request: RequestMessage): Promise<unknown> {
 }
 
 function namespaceRoot(namespace: RequestMessage["namespace"]): string {
-  if (namespace !== "chatgpt-web" && namespace !== "claude-web" && namespace !== "gemini-web" && namespace !== "grok-web") {
+  if (namespace !== "chatgpt-web" && namespace !== "claude-web" && namespace !== "gemini-web" && namespace !== "google-ai-studio" && namespace !== "grok-web") {
     throw new Error("unsupported archive namespace");
   }
   return resolve(dataRoot, "live", namespace);
