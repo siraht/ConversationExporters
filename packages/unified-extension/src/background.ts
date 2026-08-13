@@ -208,11 +208,20 @@ async function syncAiStudio(filesystem: ArchiveFileSystem): Promise<SyncSummary>
 }
 
 async function pageRequest(pattern: string, operation: PageRequest["operation"], parameters?: Record<string, unknown>): Promise<unknown> {
-  const tabs = await chrome.tabs.query({ url: pattern }); const tab = tabs.find((item) => item.id !== undefined);
-  if (!tab?.id) throw new Error(`Open a signed-in ${new URL(pattern.replace("*", "")).hostname} tab`);
+  const tabs = (await chrome.tabs.query({ url: pattern }))
+    .filter((tab): tab is chrome.tabs.Tab & { id: number } => tab.id !== undefined)
+    .sort((left, right) => (right.lastAccessed ?? 0) - (left.lastAccessed ?? 0));
+  if (!tabs.length) throw new Error(`Open a signed-in ${new URL(pattern.replace("*", "")).hostname} tab`);
   const request: PageRequest = { type: "WEB_SYNC_PAGE_REQUEST", requestId: crypto.randomUUID(), operation, ...(parameters ? { parameters } : {}) };
-  const reply = await chrome.tabs.sendMessage<PageRequest, PageReply>(tab.id, request);
-  if (!reply?.ok) throw new Error(reply?.error ?? "Provider tab did not answer"); return reply.result;
+  let lastError = "Provider tab did not answer";
+  for (const tab of tabs) {
+    try {
+      const reply = await chrome.tabs.sendMessage<PageRequest, PageReply>(tab.id, request);
+      if (reply?.ok) return reply.result;
+      lastError = reply?.error ?? lastError;
+    } catch (error) { lastError = messageOf(error); }
+  }
+  throw new Error(lastError);
 }
 
 async function readJson<T>(filesystem: ArchiveFileSystem, path: string, fallback: T): Promise<T> { const value = await filesystem.readText(path); return value ? JSON.parse(value) as T : fallback; }
