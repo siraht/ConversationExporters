@@ -22,7 +22,7 @@ await Promise.all(Object.entries(entries).map(([name, entry]) => build({
   sourcemap: false,
   minify: false,
   legalComments: "inline",
-  define: { __NATIVE_ARCHIVE__: "true" },
+  define: { __NATIVE_ARCHIVE__: "true", __BROWSER_ARCHIVE__: "false" },
 })));
 await cp(path.join(root, "public"), output, { recursive: true });
 await writeFile(path.join(output, "manifest.json"), await readFile(path.join(root, "public", "manifest.firefox.json")));

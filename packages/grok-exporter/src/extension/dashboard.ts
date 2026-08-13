@@ -3,6 +3,7 @@ import { BrowserAssetFetcher } from "./asset-fetcher";
 import { RunControl } from "../core/control";
 import { DirectoryArchiveFileSystem, type ArchiveFileSystem } from "../core/filesystem";
 import { NativeArchiveFileSystem } from "@conversation-exporters/shared/native-filesystem";
+import { IndexedDbArchiveFileSystem } from "@conversation-exporters/shared/indexeddb-filesystem";
 import { DEFAULT_CAPTURE_SETTINGS, type CaptureSettings, type ProgressEvent } from "../core/types";
 import { GrokClient } from "../grok/client";
 import { GROK_PROVIDER } from "../grok/provider";
@@ -25,7 +26,10 @@ let runControl: RunControl | undefined;
 let running = false;
 const autoInterval = automaticInterval(location.search);
 declare const __NATIVE_ARCHIVE__: boolean;
-const nativeFilesystem = __NATIVE_ARCHIVE__ ? new NativeArchiveFileSystem("grok-web") : undefined;
+declare const __BROWSER_ARCHIVE__: boolean;
+const managedFilesystem: ArchiveFileSystem | undefined = __BROWSER_ARCHIVE__
+  ? new IndexedDbArchiveFileSystem("grok-web")
+  : __NATIVE_ARCHIVE__ ? new NativeArchiveFileSystem("grok-web") : undefined;
 
 chooseButton.addEventListener("click", () => void chooseDirectory());
 openGrokButton.addEventListener("click", () => void chrome.tabs.create({ url: `${GROK_PROVIDER.primaryOrigin}/` }));
@@ -36,10 +40,10 @@ cancelButton.addEventListener("click", () => runControl?.cancel());
 void initialize();
 
 async function initialize(): Promise<void> {
-  if (nativeFilesystem) {
+  if (managedFilesystem) {
     try {
-      await nativeFilesystem.ready();
-      directoryLabel.textContent = "Private local Grok archive (native host)";
+      if (managedFilesystem instanceof NativeArchiveFileSystem || managedFilesystem instanceof IndexedDbArchiveFileSystem) await managedFilesystem.ready();
+      directoryLabel.textContent = __BROWSER_ARCHIVE__ ? "Private browser archive" : "Private local Grok archive (native host)";
       chooseButton.hidden = true;
       startButton.disabled = false;
     } catch (error) {
@@ -57,7 +61,7 @@ async function initialize(): Promise<void> {
 
 async function automaticRun(): Promise<void> {
   try {
-    if (!nativeFilesystem && (!directoryHandle || !await ensureDirectoryPermission(directoryHandle, false))) {
+    if (!managedFilesystem && (!directoryHandle || !await ensureDirectoryPermission(directoryHandle, false))) {
       setStatus("Automatic sync needs a one-time archive-directory selection in this browser profile.", "error");
       return;
     }
@@ -92,8 +96,8 @@ async function chooseDirectory(): Promise<void> {
 }
 
 async function startExport(): Promise<void> {
-  if (running || (!directoryHandle && !nativeFilesystem)) return;
-  if (!nativeFilesystem && !await ensureDirectoryPermission(directoryHandle!, true)) {
+  if (running || (!directoryHandle && !managedFilesystem)) return;
+  if (!managedFilesystem && !await ensureDirectoryPermission(directoryHandle!, true)) {
     setStatus("Write permission was not granted.", "error");
     return;
   }
@@ -132,6 +136,7 @@ async function startExport(): Promise<void> {
         : `Incomplete: ${summary.failedCount} conversations still failed. Review reports/validation.md.`,
       summary.complete ? "complete" : "error",
     );
+    if (__BROWSER_ARCHIVE__) void chrome.runtime.sendMessage({ type: "UNIFIED_ARCHIVE_CHANGED", namespace: "grok-web" });
   } catch (error) {
     showError(error);
   } finally {
@@ -142,7 +147,7 @@ async function startExport(): Promise<void> {
 }
 
 function archiveFilesystem(): ArchiveFileSystem {
-  if (nativeFilesystem) return nativeFilesystem;
+  if (managedFilesystem) return managedFilesystem;
   if (!directoryHandle) throw new Error("Archive directory is unavailable");
   return new DirectoryArchiveFileSystem(directoryHandle);
 }
@@ -186,7 +191,7 @@ function showProgress(event: ProgressEvent): void {
 
 function setRunningUi(value: boolean): void {
   chooseButton.disabled = value;
-  startButton.disabled = value || !directoryHandle;
+  startButton.disabled = value || (!directoryHandle && !managedFilesystem);
   pauseButton.disabled = !value;
   cancelButton.disabled = !value;
   if (!value) pauseButton.textContent = "Pause";

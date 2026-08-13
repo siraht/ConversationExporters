@@ -2,6 +2,7 @@ import { ChatGptClient, type DiscoveredWorkspace } from "../chatgpt/client";
 import { CHATGPT_PROVIDER } from "../chatgpt/provider";
 import { DirectoryArchiveFileSystem, type ArchiveFileSystem } from "../core/filesystem";
 import { NativeArchiveFileSystem } from "@conversation-exporters/shared/native-filesystem";
+import { IndexedDbArchiveFileSystem } from "@conversation-exporters/shared/indexeddb-filesystem";
 import { DEFAULT_INVENTORY_SETTINGS, runWorkspaceInventories } from "../chatgpt/inventory";
 import { ChatGptCaptureEngine } from "../chatgpt/capture-engine";
 import { auditArchive, type ArchiveAuditReport } from "../chatgpt/audit";
@@ -45,7 +46,8 @@ let activeController: ControlledTransport | undefined;
 const autoInterval = automaticInterval(location.search);
 let automaticRunning = false;
 declare const __NATIVE_ARCHIVE__: boolean;
-const nativeFilesystems = new Map<string, NativeArchiveFileSystem>();
+declare const __BROWSER_ARCHIVE__: boolean;
+const managedFilesystems = new Map<string, ArchiveFileSystem>();
 
 chooseButton.addEventListener("click", () => void chooseDirectory());
 openButton.addEventListener("click", () => void chrome.tabs.create({ url: `${CHATGPT_PROVIDER.primaryOrigin}/` }));
@@ -79,11 +81,12 @@ workspaceSelect.addEventListener("change", () => {
 void initialize();
 
 async function initialize(): Promise<void> {
-  if (__NATIVE_ARCHIVE__) {
+  if (__NATIVE_ARCHIVE__ || __BROWSER_ARCHIVE__) {
     try {
       const filesystem = workspaceFilesystem("probe");
-      await filesystem.ready();
-      directoryLabel.textContent = "Private local ChatGPT archive (native host)";
+      if (filesystem instanceof NativeArchiveFileSystem || filesystem instanceof IndexedDbArchiveFileSystem) await filesystem.ready();
+      directoryLabel.textContent = __BROWSER_ARCHIVE__ ? "Private browser archive" : "Private local ChatGPT archive (native host)";
+      chooseButton.hidden = true;
     } catch (error) {
       showError(error);
       return;
@@ -106,11 +109,11 @@ async function automaticCycle(): Promise<void> {
     for (const item of workspaceSelect.options) item.selected = Boolean(item.value);
     await preflightWorkspace();
     if (status.dataset.state === "error") return;
-    if (!__NATIVE_ARCHIVE__ && (!directoryHandle || !await ensureDirectoryPermission(directoryHandle, false))) {
+    if (!managedArchive() && (!directoryHandle || !await ensureDirectoryPermission(directoryHandle, false))) {
       setStatus("Automatic sync needs a one-time parent-directory selection in this browser profile.", "error");
       return;
     }
-    if (__NATIVE_ARCHIVE__) enableNativeDirectory();
+    if (managedArchive()) enableManagedDirectory();
     else enableSelectedDirectory(directoryHandle!);
     await runInventory();
     if (status.dataset.state === "error" || confirmInventoryButton.disabled) return;
@@ -135,8 +138,8 @@ async function chooseDirectory(): Promise<void> {
     setStatus("Verify one or more workspaces before choosing their parent archive directory.", "error");
     return;
   }
-  if (__NATIVE_ARCHIVE__) {
-    enableNativeDirectory();
+  if (managedArchive()) {
+    enableManagedDirectory();
     return;
   }
   try {
@@ -153,14 +156,14 @@ async function chooseDirectory(): Promise<void> {
   }
 }
 
-function enableNativeDirectory(): void {
-  directoryLabel.textContent = "Private local ChatGPT archive (native host)";
+function enableManagedDirectory(): void {
+  directoryLabel.textContent = __BROWSER_ARCHIVE__ ? "Private browser archive" : "Private local ChatGPT archive (native host)";
   inventoryButton.disabled = false;
   captureButton.disabled = true;
   confirmInventoryButton.disabled = true;
   revalidateButton.disabled = true;
   inventoryConfirmed = false;
-  setStatus(`${verifiedWorkspaces.length} workspace${verifiedWorkspaces.length === 1 ? " is" : "s are"} ready for isolated native archives.`, "ready");
+  setStatus(`${verifiedWorkspaces.length} workspace${verifiedWorkspaces.length === 1 ? " is" : "s are"} ready for isolated managed archives.`, "ready");
 }
 
 function enableSelectedDirectory(handle: FileSystemDirectoryHandle): void {
@@ -214,10 +217,10 @@ async function preflightWorkspace(): Promise<void> {
     verifiedWorkspaces = verified;
     chooseButton.disabled = false;
     captureButton.disabled = true;
-    const retainedDirectory = __NATIVE_ARCHIVE__ || directoryHandle && await ensureDirectoryPermission(directoryHandle, false);
+    const retainedDirectory = managedArchive() || directoryHandle && await ensureDirectoryPermission(directoryHandle, false);
     if (retainedDirectory) {
       inventoryButton.disabled = false;
-      directoryLabel.textContent = __NATIVE_ARCHIVE__ ? "Private local ChatGPT archive (native host)" : `${directoryHandle!.name} (permission retained)`;
+      directoryLabel.textContent = __BROWSER_ARCHIVE__ ? "Private browser archive" : __NATIVE_ARCHIVE__ ? "Private local ChatGPT archive (native host)" : `${directoryHandle!.name} (permission retained)`;
       setStatus(`Verified ${verified.length} selected workspace${verified.length === 1 ? "" : "s"}${emptyCount ? ` (${emptyCount} empty)` : ""}. The retained archive directory is ready.`, "ready");
     } else {
       inventoryButton.disabled = true;
@@ -270,11 +273,11 @@ function resetWorkspaceSelection(): void {
 }
 
 async function runInventory(): Promise<void> {
-  if (verifiedWorkspaces.length === 0 || (!directoryHandle && !__NATIVE_ARCHIVE__) || !runtimeTransport) {
+  if (verifiedWorkspaces.length === 0 || (!directoryHandle && !managedArchive()) || !runtimeTransport) {
     setStatus("Verify selected workspaces and choose their parent archive directory first.", "error");
     return;
   }
-  if (!__NATIVE_ARCHIVE__ && !await ensureDirectoryPermission(directoryHandle!, true)) {
+  if (!managedArchive() && !await ensureDirectoryPermission(directoryHandle!, true)) {
     setStatus("Write permission for the archive directory is required.", "error");
     return;
   }
@@ -330,11 +333,11 @@ async function runInventory(): Promise<void> {
 }
 
 async function runCapture(): Promise<void> {
-  if (verifiedWorkspaces.length === 0 || (!directoryHandle && !__NATIVE_ARCHIVE__) || !runtimeTransport || !inventoryConfirmed) {
+  if (verifiedWorkspaces.length === 0 || (!directoryHandle && !managedArchive()) || !runtimeTransport || !inventoryConfirmed) {
     setStatus("Complete workspace preflight, destination selection, and inventory first.", "error");
     return;
   }
-  if (!__NATIVE_ARCHIVE__ && !await ensureDirectoryPermission(directoryHandle!, true)) {
+  if (!managedArchive() && !await ensureDirectoryPermission(directoryHandle!, true)) {
     setStatus("Write permission for the archive directory is required.", "error");
     return;
   }
@@ -379,6 +382,7 @@ async function runCapture(): Promise<void> {
     setStatus(`Capture ${terminal}: ${captured} fetched, ${rebuilt} rebuilt, ${skipped} unchanged, ${failures} failed, ${partialAssets} partial asset scopes.`, terminal === "complete" ? "complete" : terminal === "conversations complete / assets partial" ? "partial" : "error");
     log.textContent = "Independent set/hash/graph/asset validation was written to reports/validation.md and reports/validation.json. Run Revalidate only after moving or inspecting the archive; rerun capture to retry incomplete records.";
     revalidateButton.disabled = false;
+    if (__BROWSER_ARCHIVE__) void chrome.runtime.sendMessage({ type: "UNIFIED_ARCHIVE_CHANGED", namespace: "chatgpt-web" });
   } catch (error) {
     showError(error);
   } finally {
@@ -400,7 +404,7 @@ function confirmInventory(): void {
 }
 
 async function revalidateArchives(): Promise<void> {
-  if (verifiedWorkspaces.length === 0 || (!directoryHandle && !__NATIVE_ARCHIVE__)) {
+  if (verifiedWorkspaces.length === 0 || (!directoryHandle && !managedArchive())) {
     setStatus("Verify the workspaces and restore their archive-directory permission first.", "error");
     return;
   }
@@ -423,18 +427,24 @@ async function revalidateArchives(): Promise<void> {
 }
 
 async function workspaceArchive(workspace: DiscoveredWorkspace): Promise<ArchiveFileSystem> {
-  if (__NATIVE_ARCHIVE__) return workspaceFilesystem(workspace.workspaceFingerprint);
+  if (managedArchive()) return workspaceFilesystem(workspace.workspaceFingerprint);
   if (!directoryHandle) throw new Error("Archive directory is unavailable");
   return new DirectoryArchiveFileSystem(await directoryHandle.getDirectoryHandle(`ChatGPTExport-${workspace.workspaceFingerprint}`, { create: true }));
 }
 
-function workspaceFilesystem(fingerprint: string): NativeArchiveFileSystem {
-  let filesystem = nativeFilesystems.get(fingerprint);
+function workspaceFilesystem(fingerprint: string): ArchiveFileSystem {
+  let filesystem = managedFilesystems.get(fingerprint);
   if (!filesystem) {
-    filesystem = new NativeArchiveFileSystem("chatgpt-web", `ChatGPTExport-${fingerprint}`);
-    nativeFilesystems.set(fingerprint, filesystem);
+    filesystem = __BROWSER_ARCHIVE__
+      ? new IndexedDbArchiveFileSystem("chatgpt-web", `ChatGPTExport-${fingerprint}`)
+      : new NativeArchiveFileSystem("chatgpt-web", `ChatGPTExport-${fingerprint}`);
+    managedFilesystems.set(fingerprint, filesystem);
   }
   return filesystem;
+}
+
+function managedArchive(): boolean {
+  return __NATIVE_ARCHIVE__ || __BROWSER_ARCHIVE__;
 }
 
 function createControlledTransport(transport: RuntimeApiTransport): ControlledTransport {
