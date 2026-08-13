@@ -138,8 +138,14 @@ async function loadIndex(path: string): Promise<DriveIndex> {
 }
 
 async function saveIndex(path: string, index: DriveIndex): Promise<void> {
+  const serialized = `${JSON.stringify(index, null, 2)}\n`;
+  try {
+    if (await readFile(path, "utf8") === serialized) return;
+  } catch (error) {
+    if (!isMissing(error)) throw error;
+  }
   const temporary = `${path}.tmp-${process.pid}`;
-  await writeFile(temporary, `${JSON.stringify(index, null, 2)}\n`, { mode: 0o600 });
+  await writeFile(temporary, serialized, { mode: 0o600 });
   await rename(temporary, path);
 }
 
