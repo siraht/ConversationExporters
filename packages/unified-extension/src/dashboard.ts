@@ -13,6 +13,7 @@ const nativeEnabled = required<HTMLInputElement>("native-enabled");
 const cancelButton = required<HTMLButtonElement>("cancel-sync");
 let syncRunning = false;
 let cancelActiveSync: (() => void) | null = null;
+let grantedOrigins = new Set<string>();
 
 document.querySelectorAll<HTMLButtonElement>("[data-provider]").forEach((button) => button.addEventListener("click", () => void syncProvider(button.dataset.provider as SyncProvider)));
 required<HTMLButtonElement>("sync-all").addEventListener("click", () => void syncAll());
@@ -24,6 +25,7 @@ required<HTMLButtonElement>("export-archive").addEventListener("click", () => vo
 void initialize();
 
 async function initialize(): Promise<void> {
+  grantedOrigins = new Set((await chrome.permissions.getAll()).origins ?? []);
   const response = await chrome.runtime.sendMessage({ type: "UNIFIED_GET_SETTINGS" }) as { ok: boolean; settings?: { vpsEnabled: boolean; vpsBaseUrl: string; nativeEnabled: boolean; tokenConfigured: boolean } };
   if (response.ok && response.settings) {
     vpsEnabled.checked = response.settings.vpsEnabled;
@@ -44,6 +46,7 @@ async function syncProvider(provider: SyncProvider): Promise<void> {
 async function performProviderSync(provider: SyncProvider): Promise<void> {
   setStatus(`Syncing ${label(provider)}…`, "busy");
   try {
+    await ensureProviderPermissions(provider);
     let result: SyncSummary;
     if (provider === "chatgpt") result = await syncManagedChatGpt((message) => setStatus(message, "busy"), setCancellation);
     else if (provider === "grok") result = await syncManagedGrok((message) => setStatus(message, "busy"), setCancellation);
@@ -60,6 +63,35 @@ async function performProviderSync(provider: SyncProvider): Promise<void> {
     await refreshArchive();
   }
 }
+
+async function ensureProviderPermissions(provider: SyncProvider): Promise<void> {
+  const origins = provider === "gemini"
+    ? GOOGLE_MEDIA_ORIGINS
+    : provider === "ai-studio"
+      ? [...GOOGLE_MEDIA_ORIGINS, "https://drive.google.com/*"]
+      : [];
+  if (!origins.length) return;
+  const missing = origins.filter((origin) => !grantedOrigins.has(origin));
+  if (!missing.length) return;
+  const request = { origins: missing };
+  if (!await chrome.permissions.request(request)) {
+    throw new Error(`${label(provider)} needs permission to download the media referenced by your conversations.`);
+  }
+  missing.forEach((origin) => grantedOrigins.add(origin));
+}
+
+const GOOGLE_MEDIA_ORIGINS = [
+  "https://*.googleusercontent.com/*",
+  "https://*.usercontent.google.com/*",
+  "https://*.googlevideo.com/*",
+  "https://lh1.google.com/*",
+  "https://lh2.google.com/*",
+  "https://lh3.google.com/*",
+  "https://lh4.google.com/*",
+  "https://lh5.google.com/*",
+  "https://lh6.google.com/*",
+  "https://lh7.google.com/*",
+];
 
 async function syncAll(): Promise<void> {
   if (syncRunning) return;
@@ -156,11 +188,13 @@ function recordSummary(summary: ArchiveSummary): string {
   return summary.discovered !== undefined && summary.discovered > summary.captured ? `${summary.captured} / ${summary.discovered} ${plural(summary.recordKind, summary.discovered)}` : records;
 }
 function archiveDetails(summary: ArchiveSummary): string {
-  const details = summary.namespace === "chatgpt-web"
+  const details = summary.namespace === "chatgpt-web" || summary.namespace === "claude-web"
     ? [countLabel(summary.workspaces ?? 0, "workspace"), countLabel(summary.projects ?? 0, "project"), countLabel(summary.assets ?? 0, "asset")]
-    : summary.namespace === "grok-web"
+    : summary.namespace === "grok-web" || summary.namespace === "gemini-web"
       ? [countLabel(summary.projects ?? 0, "project"), countLabel(summary.assets ?? 0, "asset")]
-      : [countLabel(summary.files, "archive file")];
+      : summary.namespace === "google-ai-studio"
+        ? [countLabel(summary.assets ?? 0, "asset")]
+        : [countLabel(summary.files, "archive file")];
   return [...details, formatBytes(summary.bytes)].join(" · ");
 }
 function countLabel(count: number, singular: string): string { return `${count} ${plural(singular, count)}`; }
