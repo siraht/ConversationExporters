@@ -50,6 +50,10 @@ try {
   });
   const archive = await dashboard.evaluate(() => chrome.runtime.sendMessage({ type: "UNIFIED_ARCHIVE_STATUS" }));
   assert(archive.ok && archive.result.some((item) => item.namespace === "claude-web" && item.files === 1), "IndexedDB archive was not visible to the service worker");
+  await dashboard.click("#refresh-status");
+  assert(await dashboard.locator('[data-archive="claude-web"] strong').textContent() !== "—", "Provider row did not render archive size");
+  assert((await dashboard.locator("#archive-status").textContent())?.includes("1 file"), "Archive toolbar did not render aggregate status");
+  assert(await dashboard.locator("#how-to-heading").isVisible(), "How-to section did not render");
   await dashboard.selectOption("#export-provider", "claude-web");
   const [download] = await Promise.all([dashboard.waitForEvent("download"), dashboard.click("#export-archive")]);
   const downloadPath = await download.path();

@@ -102,14 +102,29 @@ async function exportArchive(): Promise<void> {
 async function refresh(): Promise<void> { await refreshArchive(); }
 async function refreshArchive(): Promise<void> {
   const response = await chrome.runtime.sendMessage({ type: "UNIFIED_ARCHIVE_STATUS" }) as { ok: boolean; result?: Array<{ namespace: string; files: number; bytes: number }> };
-  archive.textContent = response.ok && response.result?.length
-    ? response.result.map((item) => `${item.namespace}: ${item.files} files · ${formatBytes(item.bytes)}`).join("\n")
-    : "Browser archive is empty.";
+  const results = response.ok ? response.result ?? [] : [];
+  const byNamespace = new Map(results.map((item) => [item.namespace, item]));
+  document.querySelectorAll<HTMLElement>("[data-archive]").forEach((cell) => {
+    const item = byNamespace.get(cell.dataset.archive ?? "");
+    const amount = cell.querySelector<HTMLElement>("strong");
+    const detail = cell.querySelector<HTMLElement>("span");
+    if (!amount || !detail) return;
+    amount.textContent = item ? formatBytes(item.bytes) : "—";
+    detail.textContent = item ? `${item.files} file${item.files === 1 ? "" : "s"}` : "No browser archive yet";
+    cell.dataset.populated = String(Boolean(item));
+  });
+  const totalFiles = results.reduce((sum, item) => sum + item.files, 0);
+  const totalBytes = results.reduce((sum, item) => sum + item.bytes, 0);
+  archive.textContent = totalFiles ? `${totalFiles} files · ${formatBytes(totalBytes)} total` : "Browser archive is empty";
 }
 
 function required<T extends HTMLElement>(id: string): T { const element = document.getElementById(id); if (!element) throw new Error(`Missing ${id}`); return element as T; }
 function setBusy(button: HTMLButtonElement | undefined, value: boolean): void { if (button) { button.disabled = value; button.setAttribute("aria-busy", String(value)); } }
-function setStatus(message: string, state: string): void { status.textContent = message; status.dataset.state = state; }
+function setStatus(message: string, state: string): void {
+  status.textContent = message;
+  status.dataset.state = state;
+  status.closest<HTMLElement>(".activity-rail")?.setAttribute("data-state", state);
+}
 function messageOf(error: unknown): string { return error instanceof Error ? error.message : "Operation failed"; }
 function label(provider: DirectProvider): string { return provider === "ai-studio" ? "AI Studio" : provider[0]!.toUpperCase() + provider.slice(1); }
 function formatBytes(bytes: number): string { return bytes < 1_048_576 ? `${(bytes / 1024).toFixed(1)} KiB` : bytes < 1_073_741_824 ? `${(bytes / 1_048_576).toFixed(1)} MiB` : `${(bytes / 1_073_741_824).toFixed(2)} GiB`; }

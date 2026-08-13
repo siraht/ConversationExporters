@@ -4,25 +4,101 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Conversation Archive</title><link rel="stylesheet" href="dashboard.css">
 </head>
-<body><main>
-  <header><div><p class="eyebrow">PRIVATE CONVERSATION ARCHIVE</p><h1>Conversation Archive</h1><p>One local-first extension for ChatGPT, Claude, Gemini, Google AI Studio, and Grok.</p></div><span>NO TELEMETRY</span></header>
-  <section><h2>Providers</h2><div class="providers">
-    <article><h3>ChatGPT</h3><p>Complete workspace-aware inventory, assets, resume, and validation.</p><div class="card-actions"><button data-open="chatgpt.html">Browser archive</button><button class="secondary" data-open="chatgpt-folder.html">Direct folder</button></div></article>
-    <article><h3>Grok</h3><p>Complete inventory, projects, assets, resume, and validation.</p><div class="card-actions"><button data-open="grok.html">Browser archive</button><button class="secondary" data-open="grok-folder.html">Direct folder</button></div></article>
-    <article><h3>Claude</h3><p>Incremental authenticated conversation sync.</p><button data-provider="claude">Sync Claude</button></article>
-    <article><h3>Gemini</h3><p>Incremental authenticated list/read-chat RPC sync.</p><button data-provider="gemini">Sync Gemini</button></article>
-    <article><h3>AI Studio</h3><p>Lossless saved-prompt inventory and detail capture. After installing or reloading, refresh prompt history and open one saved prompt once.</p><button data-provider="ai-studio">Sync AI Studio</button></article>
-  </div><div class="actions"><button id="sync-direct-all">Sync Claude, Gemini, and AI Studio</button></div></section>
-  <section><div class="heading"><div><h2>Browser archive</h2><p>IndexedDB is the default and requires no companion application.</p></div><button id="refresh-status" class="secondary">Refresh</button></div><pre id="archive-status">Loading…</pre>
-    <div class="actions"><select id="export-provider"><option value="all">All providers</option><option value="chatgpt-web">ChatGPT</option><option value="claude-web">Claude</option><option value="gemini-web">Gemini</option><option value="google-ai-studio">AI Studio</option><option value="grok-web">Grok</option></select><button id="export-archive">Download ZIP</button></div>
-  </section>
-  <section><h2>Replication targets</h2><p>VPS sync uses a small generic HTTP receiver. The native host is optional and useful for very large archives or existing local automation.</p>
-    <label class="check"><input id="vps-enabled" type="checkbox"> Enable VPS replication</label>
-    <label>Receiver URL<input id="vps-url" type="url" placeholder="https://archive.example.com"></label>
-    <label>Bearer token<input id="vps-token" type="password" autocomplete="new-password"></label>
-    <label class="check"><input id="native-enabled" type="checkbox"> Mirror to optional native host</label>
-    <div class="actions"><button id="save-storage">Save storage settings</button><button id="sync-storage" class="secondary">Sync changed files now</button></div>
-  </section>
-  <section class="run"><p id="status" data-state="idle">Ready.</p></section>
-  <footer>Provider credentials remain inside signed-in provider tabs. VPS credentials remain in extension-local storage.</footer>
-</main><script src="dashboard.js"></script></body></html>
+<body>
+  <main>
+    <header>
+      <div><p class="eyebrow">PRIVATE CONVERSATION ARCHIVE</p><h1>Conversation Archive</h1><p>Keep your AI conversation history local, current, and portable.</p></div>
+      <span class="privacy-mark">LOCAL FIRST · NO TELEMETRY</span>
+    </header>
+
+    <section class="provider-panel" aria-labelledby="providers-heading">
+      <div class="section-heading">
+        <div><p class="section-kicker">ARCHIVE LEDGER</p><h2 id="providers-heading">Providers</h2></div>
+        <div class="archive-tools">
+          <span id="archive-status">Loading archive…</span>
+          <button id="refresh-status" class="quiet-button">Refresh</button>
+          <select id="export-provider" aria-label="Provider to download">
+            <option value="all">All providers</option><option value="chatgpt-web">ChatGPT</option><option value="claude-web">Claude</option><option value="gemini-web">Gemini</option><option value="google-ai-studio">AI Studio</option><option value="grok-web">Grok</option>
+          </select>
+          <button id="export-archive">Download ZIP</button>
+        </div>
+      </div>
+
+      <div class="provider-table" role="table" aria-label="Conversation providers and local archive status">
+        <div class="provider-table__header" role="row">
+          <span role="columnheader">Provider</span><span role="columnheader">Capture mode</span><span role="columnheader">Browser archive</span><span role="columnheader">Action</span>
+        </div>
+
+        <div class="provider-row" role="row">
+          <div class="provider-name" role="cell"><span class="provider-mark provider-mark--chatgpt">C</span><div><h3>ChatGPT</h3><p>Workspaces, projects, assets, and validation</p></div></div>
+          <div class="capture-mode" role="cell"><span class="mode-dot"></span>Complete exporter</div>
+          <div class="archive-cell" role="cell" data-archive="chatgpt-web"><strong>—</strong><span>No browser archive yet</span></div>
+          <div class="provider-actions" role="cell"><button data-open="chatgpt.html">Open exporter</button><button class="text-button" data-open="chatgpt-folder.html">Use folder mode</button></div>
+        </div>
+
+        <div class="provider-row" role="row">
+          <div class="provider-name" role="cell"><span class="provider-mark provider-mark--grok">G</span><div><h3>Grok</h3><p>Projects, conversations, assets, and resume</p></div></div>
+          <div class="capture-mode" role="cell"><span class="mode-dot"></span>Complete exporter</div>
+          <div class="archive-cell" role="cell" data-archive="grok-web"><strong>—</strong><span>No browser archive yet</span></div>
+          <div class="provider-actions" role="cell"><button data-open="grok.html">Open exporter</button><button class="text-button" data-open="grok-folder.html">Use folder mode</button></div>
+        </div>
+
+        <div class="provider-row" role="row">
+          <div class="provider-name" role="cell"><span class="provider-mark provider-mark--claude">A</span><div><h3>Claude</h3><p>Authenticated incremental conversation sync</p></div></div>
+          <div class="capture-mode" role="cell"><span class="mode-dot"></span>Incremental sync</div>
+          <div class="archive-cell" role="cell" data-archive="claude-web"><strong>—</strong><span>No browser archive yet</span></div>
+          <div class="provider-actions" role="cell"><button data-provider="claude">Sync now</button></div>
+        </div>
+
+        <div class="provider-row" role="row">
+          <div class="provider-name" role="cell"><span class="provider-mark provider-mark--gemini">G</span><div><h3>Gemini</h3><p>Authenticated conversation list and detail sync</p></div></div>
+          <div class="capture-mode" role="cell"><span class="mode-dot"></span>Incremental sync</div>
+          <div class="archive-cell" role="cell" data-archive="gemini-web"><strong>—</strong><span>No browser archive yet</span></div>
+          <div class="provider-actions" role="cell"><button data-provider="gemini">Sync now</button></div>
+        </div>
+
+        <div class="provider-row" role="row">
+          <div class="provider-name" role="cell"><span class="provider-mark provider-mark--studio">AI</span><div><h3>AI Studio</h3><p>Lossless saved-prompt inventory and details</p></div></div>
+          <div class="capture-mode" role="cell"><span class="mode-dot"></span>Full prompt sync</div>
+          <div class="archive-cell" role="cell" data-archive="google-ai-studio"><strong>—</strong><span>No browser archive yet</span></div>
+          <div class="provider-actions" role="cell"><button data-provider="ai-studio">Sync now</button></div>
+        </div>
+      </div>
+
+      <div class="provider-footer"><span>Browser archives live in extension storage until you download or replicate them.</span><button id="sync-direct-all" class="secondary">Sync Claude, Gemini &amp; AI Studio</button></div>
+    </section>
+
+    <section aria-labelledby="replication-heading">
+      <div class="section-heading"><div><p class="section-kicker">OPTIONAL COPY</p><h2 id="replication-heading">Replication</h2><p>Send changed archive files to a generic HTTPS receiver or an installed native host.</p></div></div>
+      <div class="storage-grid">
+        <label class="check"><input id="vps-enabled" type="checkbox"> Enable VPS replication</label>
+        <label>Receiver URL<input id="vps-url" type="url" placeholder="https://archive.example.com"></label>
+        <label>Bearer token<input id="vps-token" type="password" autocomplete="new-password"></label>
+        <label class="check"><input id="native-enabled" type="checkbox"> Mirror to optional native host</label>
+      </div>
+      <div class="actions"><button id="save-storage">Save storage settings</button><button id="sync-storage" class="secondary">Sync changed files</button></div>
+    </section>
+
+    <section class="how-to" aria-labelledby="how-to-heading">
+      <div class="section-heading"><div><p class="section-kicker">REFERENCE</p><h2 id="how-to-heading">How to use it</h2><p>The short version: stay signed in, refresh provider tabs after extension updates, then sync.</p></div></div>
+      <div class="steps">
+        <div><span>1</span><h3>Open signed-in tabs</h3><p>Keep each provider open in this browser. The extension uses the session already in that tab.</p></div>
+        <div><span>2</span><h3>Capture conversations</h3><p>Open the ChatGPT or Grok exporter, or use Sync now for Claude, Gemini, and AI Studio.</p></div>
+        <div><span>3</span><h3>Keep a portable copy</h3><p>Download a ZIP, or configure replication to copy changed archive files to storage you control.</p></div>
+      </div>
+      <div class="faq-list">
+        <details><summary>What does AI Studio need before its first sync?</summary><p>After installing or reloading the extension, refresh AI Studio History and open one saved prompt once. This initializes the authenticated inventory and detail requests used by sync.</p></details>
+        <details><summary>Where do credentials and conversations go?</summary><p>Provider credentials remain inside signed-in provider tabs. VPS credentials remain in extension-local storage. Conversations stay in the browser archive unless you download them or enable a replication target.</p></details>
+        <details><summary>Why do ChatGPT and Grok open a separate exporter?</summary><p>Their exports include larger inventories, projects, assets, resumable progress, and validation. Their focused exporter view makes that progress visible without crowding this dashboard.</p></details>
+        <details><summary>Do repeated syncs create duplicates?</summary><p>No. Provider records use stable identities; subsequent syncs retain or replace the existing record when content changes.</p></details>
+      </div>
+    </section>
+  </main>
+
+  <aside class="activity-rail" data-state="idle" aria-live="polite" aria-label="Current activity">
+    <div class="activity-rail__heading"><span>ACTIVITY</span><i aria-hidden="true"></i></div>
+    <p id="status" data-state="idle">Ready.</p>
+  </aside>
+  <script src="dashboard.js"></script>
+</body>
+</html>
