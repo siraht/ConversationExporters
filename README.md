@@ -10,7 +10,7 @@ The unified extension keeps its canonical archive in browser IndexedDB, can down
 - Grok keeps the mature global/project inventory, assets, resume, and archive validation from GrokExporter.
 - Claude incrementally lists and reads conversations through Claude's authenticated web API.
 - Gemini incrementally lists and reads chats through Gemini's authenticated page RPCs, with rendered extraction retained as a fallback in the underlying adapter.
-- Google AI Studio captures the authenticated `ListPrompts` request made by the page, paginates it without exposing its opaque session fields, and stores each complete provider response losslessly with a stable ID and content hash.
+- Google AI Studio captures the authenticated `ListPrompts` and `GetPrompt` requests made by the page, paginates inventory and fetches every full saved prompt without exposing opaque session fields, then stores both provider responses losslessly with a stable ID and content hash.
 
 Provider credentials stay in the provider page. The page bridge returns only the requested conversation data, and the service worker rejects endpoints outside each adapter's allowlist.
 
@@ -28,7 +28,7 @@ The final unpacked builds are in `packages/unified-extension/dist/chrome` and `p
 
 For Chrome, open `chrome://extensions`, enable **Developer mode**, click **Load unpacked**, and select `packages/unified-extension/dist/chrome`. For Firefox or Zen, open `about:debugging#/runtime/this-firefox`, click **Load Temporary Add-on**, and select `packages/unified-extension/dist/firefox/manifest.json`. Firefox temporary installations disappear when the browser restarts; an AMO-signed build installs permanently.
 
-After installing or reloading the extension, refresh any signed-in provider tabs so their page bridges are current. Click the extension icon to open the unified dashboard. ChatGPT and Grok have their full exporter dashboards; Claude, Gemini, and AI Studio sync directly from the unified page. AI Studio must make one prompt-history request after the extension loads, so open its saved prompt/history view and refresh it before the first sync.
+After installing or reloading the extension, refresh any signed-in provider tabs so their page bridges are current. Click the extension icon to open the unified dashboard. ChatGPT and Grok have their full exporter dashboards; Claude, Gemini, and AI Studio sync directly from the unified page. AI Studio must initialize both current RPC shapes after the extension loads, so refresh its saved prompt/history view and open any one saved prompt before the first sync.
 
 IndexedDB works in both browsers with no companion application. The direct-folder buttons appear only where the browser implements the File System Access directory picker, currently Chromium. ZIP creation has a 1 GiB in-browser safety limit; use VPS or native replication for larger browser archives.
 

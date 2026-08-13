@@ -191,18 +191,19 @@ async function syncGemini(filesystem: ArchiveFileSystem): Promise<SyncSummary> {
 }
 
 async function syncAiStudio(filesystem: ArchiveFileSystem): Promise<SyncSummary> {
-  const prompts = (await pageRequest("https://aistudio.google.com/*", "aiStudioList")) as unknown[][];
+  const prompts = asRecords(await pageRequest("https://aistudio.google.com/*", "aiStudioList"));
   const prior = await readJson<{ prompts: JsonRecord[] }>(filesystem, "prompts.json", { prompts: [] });
   const previous = new Map(prior.prompts.flatMap((row) => typeof row.id === "string" ? [[row.id, row] as const] : []));
   const output: JsonRecord[] = []; let fetched = 0, unchanged = 0;
   for (const raw of prompts) {
-    const id = text(raw[0]); if (!id) continue; const hash = await sha256Hex(JSON.stringify(raw)); const old = previous.get(id);
+    const id = text(raw.id); if (!id || !Array.isArray(raw.inventory) || !("detail" in raw)) continue;
+    const hash = await sha256Hex(JSON.stringify({ inventory: raw.inventory, detail: raw.detail })); const old = previous.get(id);
     if (old?.hash === hash) { output.push(old); unchanged += 1; }
-    else { const metadata = Array.isArray(raw[4]) ? raw[4] : []; output.push({ id, title: text(metadata[0]) || text(metadata[1]) || "Untitled", hash, raw }); fetched += 1; }
+    else { const metadata = Array.isArray(raw.inventory[4]) ? raw.inventory[4] : []; output.push({ id, title: text(metadata[0]) || text(metadata[1]) || "Untitled", hash, inventory: raw.inventory, detail: raw.detail }); fetched += 1; }
     previous.delete(id);
   }
   const retained = previous.size; output.push(...previous.values()); output.sort(by("id"));
-  await filesystem.writeTextAtomic("prompts.json", JSON.stringify({ schema: "conversation-exporters/ai-studio-web/1", prompts: output }));
+  await filesystem.writeTextAtomic("prompts.json", JSON.stringify({ schema: "conversation-exporters/ai-studio-web/2", prompts: output }));
   return { provider: "ai-studio", discovered: prompts.length, fetched, unchanged, retained, failed: 0 };
 }
 

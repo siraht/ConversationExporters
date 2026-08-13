@@ -6,7 +6,9 @@ interface CapturedRequest {
   body: JsonArray;
 }
 
-let captured: CapturedRequest | undefined;
+export interface AiStudioPromptRecord { id: string; inventory: unknown[]; detail: unknown }
+let capturedList: CapturedRequest | undefined;
+let capturedGet: CapturedRequest | undefined;
 let originalFetch: typeof window.fetch | undefined;
 
 export function installAiStudioCapture(): void {
@@ -16,33 +18,42 @@ export function installAiStudioCapture(): void {
     const capture = captureRequest(input, init);
     const response = await originalFetch!(input, init);
     const request = await capture;
-    if (request) {
-      captured = request;
-    }
+    if (request?.url.includes("/MakerSuiteService/ListPrompts")) capturedList = request;
+    if (request?.url.includes("/MakerSuiteService/GetPrompt")) capturedGet = request;
     return response;
   };
 }
 
-export async function listAiStudioPrompts(): Promise<unknown[][]> {
+export async function listAiStudioPrompts(): Promise<AiStudioPromptRecord[]> {
   if (location.hostname !== "aistudio.google.com") throw new Error("wrong provider tab");
-  const template = captured;
+  const listTemplate = capturedList;
+  const getTemplate = capturedGet;
   if (!originalFetch) throw new Error("AI Studio page bridge is unavailable");
-  if (!template) throw new Error("AI Studio prompt inventory is not initialized. Open or refresh AI Studio's prompt history, then retry.");
+  if (!listTemplate) throw new Error("AI Studio prompt inventory is not initialized. Open or refresh AI Studio's prompt history, then retry.");
+  if (!getTemplate) throw new Error("AI Studio prompt detail is not initialized. Open one saved prompt after refreshing AI Studio, then retry.");
   const output = new Map<string, unknown[]>();
   let cursor: string | null = null;
   for (let page = 0; page < 200; page += 1) {
-    const body = [...template.body];
+    const body = [...listTemplate.body];
     body[0] = 100;
     body[1] = cursor;
-    const response = await requestPage(template, body);
+    const response = await requestPage(listTemplate, body, "inventory");
     const parsed = parsePromptPage(response);
     for (const prompt of parsed.prompts) output.set(promptIdentity(prompt), prompt);
     if (!parsed.cursor || parsed.cursor === cursor) break;
     cursor = parsed.cursor;
   }
   if (!output.size) throw new Error("AI Studio returned no saved prompts");
-  return [...output.values()];
+  const records: AiStudioPromptRecord[] = [];
+  for (const inventory of output.values()) {
+    const id = promptIdentity(inventory);
+    const detail = await requestPage(getTemplate, promptRequestBody(getTemplate.body, id), "prompt detail");
+    records.push({ id, inventory, detail });
+  }
+  return records;
 }
+
+export function promptRequestBody(template: JsonArray, id: string): JsonArray { const body = [...template]; body[0] = id; return body; }
 
 export function parsePromptPage(value: unknown): { prompts: unknown[][]; cursor: string | null } {
   if (!Array.isArray(value)) throw new Error("AI Studio prompt inventory was malformed");
@@ -61,7 +72,7 @@ export function promptIdentity(prompt: unknown[]): string {
 async function captureRequest(input: RequestInfo | URL, init?: RequestInit): Promise<CapturedRequest | undefined> {
   const request = input instanceof Request ? input : undefined;
   const url = request?.url ?? String(input);
-  if (!url.includes("/MakerSuiteService/ListPrompts")) return undefined;
+  if (!url.includes("/MakerSuiteService/ListPrompts") && !url.includes("/MakerSuiteService/GetPrompt")) return undefined;
   const bodyText = typeof init?.body === "string" ? init.body : request ? await request.clone().text() : undefined;
   if (!bodyText) return undefined;
   let body: unknown;
@@ -76,9 +87,9 @@ async function captureRequest(input: RequestInfo | URL, init?: RequestInit): Pro
   };
 }
 
-async function requestPage(template: CapturedRequest, body: JsonArray): Promise<unknown> {
+async function requestPage(template: CapturedRequest, body: JsonArray, label: string): Promise<unknown> {
   if (!originalFetch) throw new Error("AI Studio page bridge is unavailable");
   const response = await originalFetch(template.url, { ...template.init, body: JSON.stringify(body) });
-  if (!response.ok) throw new Error(`AI Studio inventory failed (${response.status})`);
+  if (!response.ok) throw new Error(`AI Studio ${label} failed (${response.status})`);
   return await response.json();
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parsePromptPage, promptIdentity } from "../src/ai-studio";
+import { parsePromptPage, promptIdentity, promptRequestBody } from "../src/ai-studio";
 
 describe("AI Studio prompt RPC", () => {
   it("parses full prompt records and pagination cursor", () => {
@@ -11,5 +11,10 @@ describe("AI Studio prompt RPC", () => {
 
   it("rejects records without provider identity", () => {
     expect(() => promptIdentity([])).toThrow("identity");
+  });
+
+  it("replays a captured GetPrompt request without changing opaque fields", () => {
+    expect(promptRequestBody(["prompts/example", null, "drive-token"], "prompts/next"))
+      .toEqual(["prompts/next", null, "drive-token"]);
   });
 });
