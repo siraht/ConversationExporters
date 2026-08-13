@@ -1,0 +1,16 @@
+[Unit]
+Description=Conversation Archive receiver
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/conversation-archive-receiver.env
+ExecStart=/usr/bin/node __SERVER_PATH__
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target
