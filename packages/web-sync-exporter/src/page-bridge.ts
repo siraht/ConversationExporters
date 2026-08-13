@@ -1,8 +1,11 @@
 import { safeToken, type PageReply, type PageRequest } from "./protocol";
 import { parseGeminiChatResponse, parseGeminiResponse } from "./gemini";
+import { installAiStudioCapture, listAiStudioPrompts } from "./ai-studio";
 
 const requestChannel = "conversation-sync:page-request:v1";
 const responseChannel = "conversation-sync:page-response:v1";
+
+installAiStudioCapture();
 
 window.addEventListener("message", (event: MessageEvent) => {
   const data = event.data as { channel?: string; request?: PageRequest } | undefined;
@@ -17,6 +20,7 @@ async function execute(request: PageRequest): Promise<PageReply> {
         : request.operation === "geminiList" ? await geminiList()
           : request.operation === "geminiDetail" ? await geminiDetail(request.parameters)
           : request.operation === "geminiExtract" ? geminiExtract()
+            : request.operation === "aiStudioList" ? await listAiStudioPrompts()
             : (() => { throw new Error("unsupported page operation"); })();
     return { requestId: request.requestId, ok: true, result };
   } catch (error) {
