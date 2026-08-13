@@ -1,0 +1,30 @@
+{
+  "name": "conversation-exporter",
+  "version": "0.2.0",
+  "private": true,
+  "description": "One cross-browser extension for exporting ChatGPT, Claude, Gemini, Google AI Studio, and Grok conversations.",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check": "npm run typecheck && npm test && npm run build && npm run test:extension",
+    "package": "node scripts/package.mjs && node scripts/package-source.mjs",
+    "test": "vitest run",
+    "test:extension": "node scripts/test-extension.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@conversation-exporters/shared": "0.1.0",
+    "chatgpt-exporter": "0.1.6",
+    "grok-exporter": "0.1.0",
+    "web-sync-exporter": "0.1.0",
+    "fflate": "^0.8.2"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.1.0",
+    "@types/node": "^24.0.0",
+    "esbuild": "^0.25.0",
+    "playwright": "^1.54.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.0"
+  }
+}

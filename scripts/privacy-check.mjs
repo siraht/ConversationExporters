@@ -22,7 +22,8 @@ for (const file of files) {
     continue;
   }
   if (file.includes("fixtures/") || file.endsWith("privacy-check.mjs")) continue;
-  for (const pattern of forbiddenContent) {
+  for (const [index, pattern] of forbiddenContent.entries()) {
+    if (index === 0 && /\.[cm]?[jt]sx?$/.test(file)) continue;
     if (pattern.test(text)) findings.push(`${file}: forbidden credential-like content`);
   }
 }

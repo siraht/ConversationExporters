@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Conversation Archive",
+  "version": "0.2.0",
+  "description": "Private, resumable archives of ChatGPT, Claude, Gemini, AI Studio, and Grok conversations.",
+  "permissions": ["alarms", "downloads", "storage", "tabs", "unlimitedStorage"],
+  "optional_permissions": ["nativeMessaging"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "host_permissions": ["https://chatgpt.com/*", "https://claude.ai/*", "https://gemini.google.com/*", "https://aistudio.google.com/*", "https://grok.com/*", "https://assets.grok.com/*", "https://imagine-public.x.ai/*", "https://pbs.twimg.com/*", "https://video.twimg.com/*"],
+  "background": { "scripts": ["background.js"] },
+  "icons": { "16": "icon-16.png", "32": "icon-32.png", "48": "icon-48.png", "128": "icon-128.png" },
+  "action": { "default_title": "Open Conversation Archive", "default_icon": { "16": "icon-16.png", "32": "icon-32.png" } },
+  "browser_specific_settings": { "gecko": { "id": "conversation-archive@conversation-exporters.org", "strict_min_version": "142.0", "data_collection_permissions": { "required": ["none"], "optional": ["personalCommunications", "websiteContent"] } } },
+  "content_security_policy": { "extension_pages": "script-src 'self'; object-src 'none'" },
+  "content_scripts": [
+    { "matches": ["https://chatgpt.com/*"], "js": ["chatgpt-page-bridge.js"], "run_at": "document_start", "world": "MAIN" },
+    { "matches": ["https://chatgpt.com/*"], "js": ["chatgpt-content-relay.js"], "run_at": "document_start" },
+    { "matches": ["https://grok.com/*"], "js": ["grok-page-bridge.js"], "run_at": "document_start", "world": "MAIN" },
+    { "matches": ["https://grok.com/*"], "js": ["grok-content-relay.js"], "run_at": "document_start" },
+    { "matches": ["https://claude.ai/*", "https://gemini.google.com/*", "https://aistudio.google.com/*"], "js": ["web-page-bridge.js"], "run_at": "document_start", "world": "MAIN" },
+    { "matches": ["https://claude.ai/*", "https://gemini.google.com/*", "https://aistudio.google.com/*"], "js": ["web-content-relay.js"], "run_at": "document_start" }
+  ]
+}
