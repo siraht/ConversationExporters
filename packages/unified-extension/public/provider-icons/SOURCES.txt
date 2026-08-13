@@ -1,0 +1,9 @@
+Provider identification assets bundled from the providers' own web properties on 2026-08-13:
+
+chatgpt.svg  https://cdn.oaistatic.com/assets/favicon-o20kmmos.svg
+grok.svg     https://grok.com/images/favicon.svg
+claude.ico   https://claude.ai/favicon.ico
+gemini.svg   https://www.gstatic.com/lamda/images/gemini_sparkle_aurora_33f86dc0c0257da337c63.svg
+ai-studio.png https://www.gstatic.com/images/branding/productlogos/ai_studio/v1/web-96dp/logo_ai_studio_color_1x_web_96dp.png
+
+All marks remain the property of their respective owners and are used only to identify the corresponding export source.

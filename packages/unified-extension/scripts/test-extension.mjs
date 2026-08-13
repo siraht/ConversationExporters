@@ -31,7 +31,8 @@ try {
   const manifest = await dashboard.evaluate(() => chrome.runtime.getManifest());
   assert(manifest.name === "Conversation Archive", "Packaged manifest did not load");
   assert(await dashboard.locator("[data-provider]").count() === 5, "Unified provider controls did not render");
-  assert(await dashboard.locator(".provider-mark svg").count() === 5, "Provider marks did not render");
+  assert(await dashboard.locator(".provider-mark img").count() === 5, "Provider marks did not render");
+  await dashboard.waitForFunction(() => [...document.querySelectorAll(".provider-mark img")].every((image) => image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0));
   const settings = await dashboard.evaluate(() => chrome.runtime.sendMessage({ type: "UNIFIED_GET_SETTINGS" }));
   assert(settings.ok && settings.settings.vpsEnabled === false, "Service worker settings protocol failed");
   await dashboard.evaluate(async () => {
@@ -52,7 +53,8 @@ try {
   const archive = await dashboard.evaluate(() => chrome.runtime.sendMessage({ type: "UNIFIED_ARCHIVE_STATUS" }));
   assert(archive.ok && archive.result.some((item) => item.namespace === "claude-web" && item.files === 1), "IndexedDB archive was not visible to the service worker");
   await dashboard.click("#refresh-status");
-  assert(await dashboard.locator('[data-archive="claude-web"] strong').textContent() !== "—", "Provider row did not render archive size");
+  await dashboard.waitForFunction(() => document.querySelector('[data-archive="claude-web"] strong')?.textContent !== "—");
+  assert((await dashboard.locator('[data-archive="claude-web"] strong').textContent())?.includes("chat"), "Provider row did not render logical archive counts");
   assert((await dashboard.locator("#archive-status").textContent())?.includes("1 file"), "Archive toolbar did not render aggregate status");
   assert(await dashboard.locator("#how-to-heading").isVisible(), "How-to section did not render");
   await dashboard.selectOption("#export-provider", "claude-web");

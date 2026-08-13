@@ -1,5 +1,6 @@
 import { listBrowserArchiveEntries } from "@conversation-exporters/shared/indexeddb-filesystem";
 import { zipSync } from "fflate";
+import { summarizeBrowserArchives, type ArchiveSummary } from "./archive-summary";
 import { syncManagedChatGpt, syncManagedGrok } from "./managed-sync";
 import type { ArchiveNamespace, DirectProvider, SyncProvider, SyncSummary } from "./types";
 
@@ -118,16 +119,15 @@ async function exportArchive(): Promise<void> {
 
 async function refresh(): Promise<void> { await refreshArchive(); }
 async function refreshArchive(): Promise<void> {
-  const response = await chrome.runtime.sendMessage({ type: "UNIFIED_ARCHIVE_STATUS" }) as { ok: boolean; result?: Array<{ namespace: string; files: number; bytes: number }> };
-  const results = response.ok ? response.result ?? [] : [];
+  const results = await summarizeBrowserArchives(await listBrowserArchiveEntries());
   const byNamespace = new Map(results.map((item) => [item.namespace, item]));
   document.querySelectorAll<HTMLElement>("[data-archive]").forEach((cell) => {
-    const item = byNamespace.get(cell.dataset.archive ?? "");
+    const item = byNamespace.get(cell.dataset.archive as ArchiveNamespace);
     const amount = cell.querySelector<HTMLElement>("strong");
     const detail = cell.querySelector<HTMLElement>("span");
     if (!amount || !detail) return;
-    amount.textContent = item ? formatBytes(item.bytes) : "—";
-    detail.textContent = item ? `${item.files} file${item.files === 1 ? "" : "s"}` : "No browser archive yet";
+    amount.textContent = item ? recordSummary(item) : "—";
+    detail.textContent = item ? archiveDetails(item) : "No browser archive yet";
     cell.dataset.populated = String(Boolean(item));
   });
   const totalFiles = results.reduce((sum, item) => sum + item.files, 0);
@@ -151,4 +151,18 @@ function setStatus(message: string, state: string): void {
 }
 function messageOf(error: unknown): string { return error instanceof Error ? error.message : "Operation failed"; }
 function label(provider: SyncProvider): string { return provider === "ai-studio" ? "AI Studio" : provider === "chatgpt" ? "ChatGPT" : provider[0]!.toUpperCase() + provider.slice(1); }
+function recordSummary(summary: ArchiveSummary): string {
+  const records = countLabel(summary.captured, summary.recordKind);
+  return summary.discovered !== undefined && summary.discovered > summary.captured ? `${summary.captured} / ${summary.discovered} ${plural(summary.recordKind, summary.discovered)}` : records;
+}
+function archiveDetails(summary: ArchiveSummary): string {
+  const details = summary.namespace === "chatgpt-web"
+    ? [countLabel(summary.workspaces ?? 0, "workspace"), countLabel(summary.projects ?? 0, "project"), countLabel(summary.assets ?? 0, "asset")]
+    : summary.namespace === "grok-web"
+      ? [countLabel(summary.projects ?? 0, "project"), countLabel(summary.assets ?? 0, "asset")]
+      : [countLabel(summary.files, "archive file")];
+  return [...details, formatBytes(summary.bytes)].join(" · ");
+}
+function countLabel(count: number, singular: string): string { return `${count} ${plural(singular, count)}`; }
+function plural(singular: string, count: number): string { return count === 1 ? singular : `${singular}s`; }
 function formatBytes(bytes: number): string { return bytes < 1_048_576 ? `${(bytes / 1024).toFixed(1)} KiB` : bytes < 1_073_741_824 ? `${(bytes / 1_048_576).toFixed(1)} MiB` : `${(bytes / 1_073_741_824).toFixed(2)} GiB`; }
