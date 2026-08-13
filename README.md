@@ -45,6 +45,8 @@ export ARCHIVE_RECEIVER_PORT=8787
 npm --workspace conversation-archive-receiver start
 ```
 
+On a systemd-based VPS, `npm --workspace conversation-archive-receiver run install:user` builds the service, creates a private token file and archive directory, and starts it as a user service. It never configures DNS, a firewall, or TLS; point your preferred HTTPS reverse proxy at the local listener.
+
 Run it as an unprivileged service account and put Caddy, nginx, a tunnel, or a private overlay network in front of `127.0.0.1:8787`. The extension requires HTTPS for a remote receiver; plain HTTP is accepted only for localhost development. A minimal Caddy route is:
 
 ```caddyfile

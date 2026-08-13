@@ -22,7 +22,8 @@ if [ ! -f "$environment_file" ]; then
   chmod 0600 "$environment_file"
 fi
 escaped_server=$(printf '%s' "$package_directory/dist/server.js" | sed 's/[&|]/\\&/g')
-sed "s|__SERVER_PATH__|$escaped_server|" "$package_directory/systemd/conversation-archive-receiver.service" > "$unit_directory/conversation-archive-receiver.service"
+escaped_environment=$(printf '%s' "$environment_file" | sed 's/[&|]/\\&/g')
+sed -e "s|__SERVER_PATH__|$escaped_server|" -e "s|__ENVIRONMENT_PATH__|$escaped_environment|" "$package_directory/systemd/conversation-archive-receiver.service" > "$unit_directory/conversation-archive-receiver.service"
 systemctl --user daemon-reload
 systemctl --user enable --now conversation-archive-receiver.service
 printf '%s\n' "Receiver installed. Put an HTTPS reverse proxy in front of 127.0.0.1:8787."

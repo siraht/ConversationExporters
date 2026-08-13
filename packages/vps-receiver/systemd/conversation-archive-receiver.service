@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-EnvironmentFile=%h/.config/conversation-archive-receiver.env
+EnvironmentFile=__ENVIRONMENT_PATH__
 ExecStart=/usr/bin/node __SERVER_PATH__
 Restart=on-failure
 RestartSec=5
