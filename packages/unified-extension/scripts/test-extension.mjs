@@ -30,7 +30,8 @@ try {
   await dashboard.setViewportSize({ width: 1280, height: 800 });
   const manifest = await dashboard.evaluate(() => chrome.runtime.getManifest());
   assert(manifest.name === "Conversation Archive", "Packaged manifest did not load");
-  assert(await dashboard.locator("[data-provider]").count() === 3, "Unified provider controls did not render");
+  assert(await dashboard.locator("[data-provider]").count() === 5, "Unified provider controls did not render");
+  assert(await dashboard.locator(".provider-mark svg").count() === 5, "Provider marks did not render");
   const settings = await dashboard.evaluate(() => chrome.runtime.sendMessage({ type: "UNIFIED_GET_SETTINGS" }));
   assert(settings.ok && settings.settings.vpsEnabled === false, "Service worker settings protocol failed");
   await dashboard.evaluate(async () => {

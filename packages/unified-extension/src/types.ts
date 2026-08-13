@@ -1,8 +1,9 @@
 export type DirectProvider = "claude" | "gemini" | "ai-studio";
+export type SyncProvider = "chatgpt" | "grok" | DirectProvider;
 export type ArchiveNamespace = "chatgpt-web" | "claude-web" | "gemini-web" | "google-ai-studio" | "grok-web";
 
 export interface SyncSummary {
-  provider: DirectProvider;
+  provider: SyncProvider;
   discovered: number;
   fetched: number;
   unchanged: number;
