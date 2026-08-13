@@ -10,7 +10,7 @@ The unified extension keeps its canonical archive in browser IndexedDB, can down
 - Grok keeps the mature global/project inventory, assets, resume, and archive validation from GrokExporter.
 - Claude incrementally lists and reads conversations through Claude's authenticated web API.
 - Gemini incrementally lists and reads chats through Gemini's authenticated page RPCs, with rendered extraction retained as a fallback in the underlying adapter.
-- Google AI Studio captures the authenticated `ListPrompts` and `GetPrompt` requests made by the page, paginates inventory and fetches every full saved prompt without exposing opaque session fields, then stores both provider responses losslessly with a stable ID and content hash.
+- Google AI Studio captures the authenticated `ListPrompts` and current `ResolveDriveResource` requests made by the page, paginates inventory and fetches every full saved prompt without exposing opaque session fields, then stores both provider responses losslessly with a stable ID and content hash.
 
 Provider credentials stay in the provider page. The page bridge returns only the requested conversation data, and the service worker rejects endpoints outside each adapter's allowlist.
 

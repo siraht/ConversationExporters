@@ -17,7 +17,8 @@
     { "matches": ["https://chatgpt.com/*"], "js": ["chatgpt-content-relay.js"], "run_at": "document_start" },
     { "matches": ["https://grok.com/*"], "js": ["grok-page-bridge.js"], "run_at": "document_start", "world": "MAIN" },
     { "matches": ["https://grok.com/*"], "js": ["grok-content-relay.js"], "run_at": "document_start" },
-    { "matches": ["https://claude.ai/*", "https://gemini.google.com/*", "https://aistudio.google.com/*"], "js": ["web-page-bridge.js"], "run_at": "document_start", "world": "MAIN" },
+    { "matches": ["https://claude.ai/*", "https://gemini.google.com/*"], "js": ["web-page-bridge.js"], "run_at": "document_start", "world": "MAIN" },
+    { "matches": ["https://aistudio.google.com/*"], "js": ["web-page-bridge.js"], "run_at": "document_start", "world": "MAIN", "all_frames": true },
     { "matches": ["https://claude.ai/*", "https://gemini.google.com/*", "https://aistudio.google.com/*"], "js": ["web-content-relay.js"], "run_at": "document_start" }
   ]
 }
