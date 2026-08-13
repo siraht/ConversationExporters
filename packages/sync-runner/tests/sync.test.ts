@@ -59,6 +59,16 @@ describe("syncOnce", () => {
     expect(ssh).toContain("--root /data/agent-session-archive");
     expect(ssh).toContain("index --json");
   });
+
+  it("mirrors supported incoming exports so one-time provider history reaches Flywheel", async () => {
+    const fixture = await setup();
+    const source = join(fixture.dataRoot, "incoming", "claude.zip");
+    await writeFile(source, "revision-one");
+    const result = await syncOnce(fixture.config, { push: true });
+    expect(result).toMatchObject({ mirroredSources: 1, remoteNewVersions: 2, remoteIndexed: true });
+    const ssh = await readFile(fixture.sshCalls, "utf8");
+    expect(ssh).toContain("web-import /data/agent-session-archive/web-mirror/laptop/incoming/claude.zip");
+  });
 });
 
 describe("source fingerprints", () => {

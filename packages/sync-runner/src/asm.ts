@@ -68,11 +68,13 @@ export async function replicateWebSources(
   sources: Array<Pick<ImportResult, "source" | "provider">>,
 ): Promise<{ mirroredSources: number; remoteNewVersions: number; remoteIndexed: boolean }> {
   const liveRoot = resolve(config.dataRoot, "live");
+  const incomingRoot = resolve(config.dataRoot, "incoming");
   const eligible: Array<{ source: string; provider: Provider; relativePath: string }> = [];
   for (const item of sources) {
     const source = resolve(item.source);
     const relativePath = relative(config.dataRoot, source).replaceAll("\\", "/");
-    if (item.provider && source.startsWith(`${liveRoot}/`)) eligible.push({ source, provider: item.provider, relativePath });
+    const isPrivateSource = source.startsWith(`${liveRoot}/`) || source.startsWith(`${incomingRoot}/`);
+    if (item.provider && isPrivateSource) eligible.push({ source, provider: item.provider, relativePath });
   }
   if (!eligible.length) return { mirroredSources: 0, remoteNewVersions: 0, remoteIndexed: false };
   safeRemote(config.destination, "destination");
