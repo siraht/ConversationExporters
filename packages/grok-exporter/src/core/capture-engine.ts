@@ -249,6 +249,8 @@ export class CaptureEngine {
       await this.options.filesystem.readText(`${conversationBasePath(conversation.id)}/complete.json`),
     );
     const unchanged = marker?.validationValid === true
+      && conversation.updatedAt !== undefined
+      && marker.remoteUpdatedAt === conversation.updatedAt
       && marker.conversationId === conversation.id
       && marker.listingHash === conversation.listingHash
       && marker.assetStatus !== "partial";

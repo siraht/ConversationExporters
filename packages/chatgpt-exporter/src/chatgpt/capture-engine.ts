@@ -123,7 +123,8 @@ export class ChatGptCaptureEngine {
       }
       await store.transition(conversation, "pending", { attempt: 1, correlationId: "queued" });
       await store.transition(conversation, "capturing", { attempt: 1, correlationId: "resume-or-fetch" });
-      const rawMarker = await store.validRawMarker(conversation);
+      // An unchanged title/listing is not freshness evidence when update_time is absent.
+      const rawMarker = conversation.updateTime === null ? undefined : await store.validRawMarker(conversation);
       if (rawMarker) rebuild.push({ conversation, rawMarker });
       else needNetwork.push(conversation);
     }
@@ -273,6 +274,7 @@ export class ChatGptCaptureEngine {
   }
 
   private async validCompletion(conversation: InventoryConversation): Promise<boolean> {
+    if (conversation.updateTime === null) return false;
     const base = conversationBasePath(conversation.conversationId);
     const marker = parseJson<ConversationCompletionMarker>(await this.options.filesystem.readText(`${base}/complete.json`));
     if (!marker

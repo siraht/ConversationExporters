@@ -18,6 +18,17 @@ const workspace: DiscoveredWorkspace = {
 };
 
 describe("journaled ChatGPT capture engine", () => {
+  it("refetches a listing without update time rather than reusing old raw content", async () => {
+    const filesystem = await fixtureFilesystem();
+    const inventory = JSON.parse((await filesystem.readText("inventory.json"))!) as ConversationInventory;
+    inventory.conversations[0]!.updateTime = null;
+    await filesystem.writeTextAtomic("inventory.json", prettyJson(inventory));
+    await new ChatGptCaptureEngine({ transport: fixtureTransport(), filesystem, workspace, runId: "run-1", now: clock() }).run();
+    const transport = fixtureTransport();
+    const result = await new ChatGptCaptureEngine({ transport, filesystem, workspace, runId: "run-2", now: clock() }).run();
+    expect(result).toMatchObject({ capturedCount: 1, rebuiltCount: 0, skippedCount: 0, failedCount: 0 });
+    expect(transport.request).toHaveBeenCalled();
+  });
   it("writes raw revisions before deterministic derived files and a final completion marker", async () => {
     const filesystem = await fixtureFilesystem();
     const transport = fixtureTransport();

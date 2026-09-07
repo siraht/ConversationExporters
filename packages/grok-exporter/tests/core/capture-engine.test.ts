@@ -15,10 +15,10 @@ const settings = {
   includeWorkspaces: false,
 };
 
-function successfulTransport(): FixtureTransport {
+function successfulTransport(withUpdateTime = true): FixtureTransport {
   return new FixtureTransport(new Map([
     ["GET /rest/app-chat/conversations?pageSize=100", [{ conversations: [
-      { conversationId: "c1", title: "One", modifyTime: "2026-01-01T00:00:00Z" },
+      { conversationId: "c1", title: "One", ...(withUpdateTime ? { modifyTime: "2026-01-01T00:00:00Z" } : {}) },
       { conversationId: "c2", title: "Two", modifyTime: "2026-01-02T00:00:00Z" },
     ] }]],
     ["GET /rest/app-chat/conversations/c1", [{ conversationId: "c1", title: "One" }]],
@@ -31,6 +31,14 @@ function successfulTransport(): FixtureTransport {
 }
 
 describe("capture engine", () => {
+  it("refetches conversations without update timestamps on each sync", async () => {
+    const filesystem = new MemoryArchiveFileSystem();
+    await new CaptureEngine({ client: new GrokClient({ transport: successfulTransport(false), settings }), filesystem }).run();
+    const transport = successfulTransport(false);
+    const summary = await new CaptureEngine({ client: new GrokClient({ transport, settings }), filesystem }).run();
+    expect(summary).toMatchObject({ complete: true, unchangedCount: 1 });
+    expect(transport.requests.some((request) => request.path === "/rest/app-chat/conversations/c1")).toBe(true);
+  });
   it("writes raw, normalized, Markdown, validation, indexes, and completion markers", async () => {
     const filesystem = new MemoryArchiveFileSystem();
     const transport = successfulTransport();

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_CAPTURE_SETTINGS } from "../../src/core/types";
 import { GrokClient, capturedResponses } from "../../src/grok/client";
 import { isAllowedGrokApiRequest } from "../../src/grok/endpoints";
+import { assetsFromEnvelope, responseNodesFromEnvelope, responsesFromEnvelope } from "../../src/grok/envelopes";
 import { FixtureTransport } from "../fixtures/grok";
 
 const settings = {
@@ -25,6 +26,34 @@ describe("Grok endpoint allowlist", () => {
 });
 
 describe("Grok inventory", () => {
+  it("distinguishes explicit empty collections from unrecognized response and asset payloads", () => {
+    for (const extract of [assetsFromEnvelope, responseNodesFromEnvelope, responsesFromEnvelope]) {
+      expect(extract({ items: [] })).toEqual([]);
+      expect(() => extract({ changedSchema: [] })).toThrow("Unrecognized Grok");
+    }
+  });
+  it("rejects unknown inventory envelopes instead of declaring an empty archive", async () => {
+    const transport = new FixtureTransport(new Map([
+      ["GET /rest/app-chat/conversations?pageSize=100", [{ newHistoryShape: [] }]],
+    ]));
+    await expect(new GrokClient({ transport, settings }).inventory()).rejects.toThrow("Unrecognized Grok conversations");
+  });
+
+  it("rejects advertised continuation without a token", async () => {
+    const transport = new FixtureTransport(new Map([
+      ["GET /rest/app-chat/conversations?pageSize=100", [{ conversations: [], hasMore: true }]],
+    ]));
+    await expect(new GrokClient({ transport, settings }).inventory()).rejects.toMatchObject({ code: "INVENTORY_TOKEN_MISSING" });
+  });
+
+  it("rejects unknown workspace inventories instead of silently omitting scopes", async () => {
+    const transport = new FixtureTransport(new Map([
+      ["GET /rest/app-chat/conversations?pageSize=100", [{ conversations: [] }]],
+      ["GET /rest/workspaces?pageSize=100&orderBy=ORDER_BY_LAST_USE_TIME", [{ unexpected: [] }]],
+    ]));
+    await expect(new GrokClient({ transport, settings: { ...settings, includeWorkspaces: true } }).inventory()).rejects.toThrow("Unrecognized Grok workspaces");
+  });
+
   it("follows page tokens to exhaustion and deduplicates IDs visibly", async () => {
     const transport = new FixtureTransport(new Map([
       ["GET /rest/app-chat/conversations?pageSize=100", [{

@@ -31,27 +31,36 @@ const RESPONSE_PATHS = [
 
 export function conversationListFromEnvelope(value: JsonValue): JsonValue[] {
   if (Array.isArray(value)) return value;
-  return firstArray(value, LIST_PATHS);
+  return requiredCollection(value, LIST_PATHS, "conversations");
 }
 
 export function responseNodesFromEnvelope(value: JsonValue): JsonValue[] {
   if (Array.isArray(value)) return value;
-  return firstArray(value, NODE_PATHS);
+  return requiredCollection(value, NODE_PATHS, "response nodes");
 }
 
 export function responsesFromEnvelope(value: JsonValue): JsonValue[] {
   if (Array.isArray(value)) return value;
-  return firstArray(value, RESPONSE_PATHS);
+  return requiredCollection(value, RESPONSE_PATHS, "responses");
 }
 
 export function assetsFromEnvelope(value: JsonValue): JsonValue[] {
   if (Array.isArray(value)) return value;
-  return firstArray(value, [["assets"], ["result", "assets"], ["data", "assets"], ["items"], ["data"], ["result"]]);
+  return requiredCollection(value, [["assets"], ["result", "assets"], ["data", "assets"], ["items"], ["data"], ["result"]], "assets");
 }
 
 export function workspacesFromEnvelope(value: JsonValue): JsonValue[] {
   if (Array.isArray(value)) return value;
-  return firstArray(value, [["workspaces"], ["result", "workspaces"], ["data", "workspaces"], ["items"], ["data"], ["result"]]);
+  return requiredCollection(value, [["workspaces"], ["result", "workspaces"], ["data", "workspaces"], ["items"], ["data"], ["result"]], "workspaces");
+}
+
+function requiredCollection(value: JsonValue, paths: readonly (readonly string[])[], label: string): JsonValue[] {
+  for (const path of paths) {
+    let candidate: JsonValue | undefined = value;
+    for (const key of path) candidate = isJsonObject(candidate) ? candidate[key] : undefined;
+    if (Array.isArray(candidate)) return candidate;
+  }
+  throw new Error(`Unrecognized Grok ${label} inventory envelope; refusing to treat it as an empty collection.`);
 }
 
 export function nextPageTokenFromEnvelope(value: JsonValue): string | undefined {

@@ -167,7 +167,10 @@ export class GrokClient {
           completed: conversations.length,
         });
 
-        if (!nextPageToken) return;
+        if (!nextPageToken) {
+          if (responseEnvelopeHasMore(response.body)) throw new GrokExporterError("Grok history reports more pages without a continuation token.", { code: "INVENTORY_TOKEN_MISSING" });
+          return;
+        }
         if (seenTokens.has(nextPageToken) || nextPageToken === pageToken) {
           throw new GrokExporterError("Grok returned a repeated conversation page token.", {
             code: "INVENTORY_TOKEN_CYCLE",
@@ -384,7 +387,10 @@ export class GrokClient {
         seenItemHashes.add(itemHash);
         items.push(item);
       }
-      if (!nextPageToken) return { complete: true, pages, items, findings };
+      if (!nextPageToken) {
+        if (responseEnvelopeHasMore(response.body)) throw new GrokExporterError(`Grok ${label} reports more pages without a continuation token.`, { code: "SUPPORTING_TOKEN_MISSING" });
+        return { complete: true, pages, items, findings };
+      }
       if (seenTokens.has(nextPageToken) || nextPageToken === pageToken) {
         throw new GrokExporterError(`Grok returned a repeated ${label} page token.`, {
           code: "SUPPORTING_TOKEN_CYCLE",

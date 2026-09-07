@@ -20,7 +20,7 @@ const workspace: DiscoveredWorkspace = {
 };
 
 describe("deterministic full-scope export integration", () => {
-  it("inventories every scope, recovers an omitted batch record, captures content/assets, audits, and repeats byte-identically", async () => {
+  it("inventories every scope, recovers an omitted batch record, captures content/assets, audits, and refreshes unversioned shares", async () => {
     const filesystem = new MemoryArchiveFileSystem();
     const transport = fullTransport();
     const inventory = await new ChatGptInventoryEngine({
@@ -78,9 +78,10 @@ describe("deterministic full-scope export integration", () => {
       batchSize: 3,
       now: () => new Date("2026-08-01T00:00:03.000Z"),
     }).run();
-    expect(repeat).toMatchObject({ capturedCount: 0, rebuiltCount: 0, skippedCount: 6, failedCount: 0 });
-    expect(repeatTransport.request).not.toHaveBeenCalled();
-    expect(await authoritativeHash(filesystem)).toBe(authoritativeBefore);
+    // The share-only listing has no update_time, so its content must be checked again.
+    expect(repeat).toMatchObject({ capturedCount: 1, rebuiltCount: 0, skippedCount: 5, failedCount: 0 });
+    expect(repeatTransport.request).toHaveBeenCalledTimes(1);
+    expect(repeatTransport.request).toHaveBeenCalledWith({ operation: "shared_detail", parameters: { shareId: "share-only" } }, workspace.accountId, expect.any(Number));
   });
 
   it("keeps identical provider IDs isolated across selected workspaces and accepts a recognized empty workspace", async () => {

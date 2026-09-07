@@ -16,6 +16,17 @@ const workspace: DiscoveredWorkspace = {
 };
 
 describe("ChatGPT complete inventory", () => {
+  it("rejects offset overlap that reaches the total while missing unique conversations", async () => {
+    const transport = scriptedTransport((operation) => {
+      if (operation.operation !== "conversation_page") throw new Error("Unexpected scope");
+      return { items: operation.parameters.offset === 0 ? [{ id: "a" }, { id: "b" }] : [{ id: "b" }, { id: "c" }], total: 4 };
+    });
+    await expect(new ChatGptInventoryEngine({
+      transport, workspace, filesystem: new MemoryArchiveFileSystem(),
+      settings: { ...DEFAULT_INVENTORY_SETTINGS, pageSize: 2, includeArchived: false, includeProjects: false, includeShared: false },
+    }).run()).rejects.toMatchObject({ code: "INVENTORY_TOTAL_MISMATCH" });
+  });
+
   it("unions main, archived, project, and shared memberships after every chain terminates", async () => {
     const filesystem = new MemoryArchiveFileSystem();
     const transport = scriptedTransport((operation) => {

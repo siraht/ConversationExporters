@@ -159,6 +159,7 @@ export class ChatGptInventoryEngine {
       await this.recordPage(scope, chainId, pageNumber, { offset, limit: this.options.settings.pageSize }, null, items.length, response.responseBytes, response.body, orderedIdHash, duplicateCount, termination);
       this.report(scope, chainId, pageNumber);
       if (termination) {
+        if (total !== null && seenIds.size < total) throw new InventoryError("INVENTORY_TOTAL_MISMATCH", `${scope} history ended with ${seenIds.size} unique conversations before declared total ${total}. Retry after history stops changing.`);
         this.chains.push(chain(chainId, scope, pageNumber, totalItems, seenIds.size, termination));
         return;
       }
@@ -277,6 +278,7 @@ export class ChatGptInventoryEngine {
       await this.recordPage("shared", chainId, pageNumber, { offset, limit: this.options.settings.pageSize }, null, items.length, response.responseBytes, response.body, orderedIdHash, duplicateCount, termination);
       this.report("shared", chainId, pageNumber);
       if (termination) {
+        if (total !== null && seenShareIds.size < total) throw new InventoryError("INVENTORY_TOTAL_MISMATCH", `Shared history ended with ${seenShareIds.size} unique shares before declared total ${total}. Retry after history stops changing.`);
         this.chains.push(chain(chainId, "shared", pageNumber, totalItems, seenShareIds.size, termination));
         return;
       }
