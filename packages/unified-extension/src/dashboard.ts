@@ -1,6 +1,7 @@
 import { listBrowserArchiveEntries } from "@conversation-exporters/shared/indexeddb-filesystem";
 import { zipSync } from "fflate";
 import { summarizeBrowserArchives, type ArchiveSummary } from "./archive-summary";
+import { initializeObservability, refreshCoverage } from "./observability-ui";
 import type { ArchiveNamespace, DirectProvider, SyncProvider, SyncSummary } from "./types";
 
 const status = required<HTMLElement>("status");
@@ -21,6 +22,12 @@ required<HTMLButtonElement>("save-storage").addEventListener("click", () => void
 required<HTMLButtonElement>("sync-storage").addEventListener("click", () => void syncStorage());
 required<HTMLButtonElement>("refresh-status").addEventListener("click", () => void refresh());
 required<HTMLButtonElement>("export-archive").addEventListener("click", () => void exportArchive());
+initializeObservability((running, message, error) => {
+  syncRunning = running; setProviderControlsBusy(running);
+  setCancellation(running ? () => { void chrome.runtime.sendMessage({ type: "UNIFIED_CANCEL_SYNC" }); } : null);
+  setStatus(message, running ? "busy" : error ? "error" : "complete");
+  if (!running) void refreshArchive();
+});
 void initialize();
 
 async function initialize(): Promise<void> {
@@ -157,18 +164,7 @@ async function exportArchive(): Promise<void> {
   finally { setBusy(button, false); }
 }
 
-async function refresh(): Promise<void> { await refreshArchive(); await refreshSchedule(); await refreshActiveSync(); }
-async function refreshActiveSync(): Promise<void> {
-  const key = "conversationExporters.activeSync";
-  const value = (await chrome.storage.local.get(key))[key] as { provider?: string; status?: string; message?: string; error?: string } | undefined;
-  if (!value) return;
-  const running = value.status === "running";
-  syncRunning = running;
-  setProviderControlsBusy(running);
-  setCancellation(running ? () => { void chrome.runtime.sendMessage({ type: "UNIFIED_CANCEL_SYNC" }); } : null);
-  setStatus(value.error ?? value.message ?? `${value.provider ?? "Provider"}: ${value.status ?? "unknown"}`, running ? "busy" : value.status === "complete" ? "complete" : "error");
-  if (!running) await refreshArchive();
-}
+async function refresh(): Promise<void> { await refreshArchive(); await refreshSchedule(); await refreshCoverage(); }
 async function refreshSchedule(): Promise<void> {
   const key = "conversationExporters.scheduledSync";
   const value = (await chrome.storage.local.get(key))[key] as { status?: string; startedAt?: string; completedAt?: string; error?: string; results?: Record<string, { error?: string; failed?: number }> } | undefined;
@@ -180,7 +176,6 @@ async function refreshSchedule(): Promise<void> {
 }
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && changes["conversationExporters.scheduledSync"]) void refreshSchedule();
-  if (area === "local" && changes["conversationExporters.activeSync"]) void refreshActiveSync();
 });
 async function refreshArchive(): Promise<void> {
   const results = await summarizeBrowserArchives(await listBrowserArchiveEntries());

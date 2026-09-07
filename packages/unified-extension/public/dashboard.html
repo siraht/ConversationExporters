@@ -68,6 +68,29 @@
       <div class="provider-footer"><span>Browser archives live in extension storage until you download or replicate them.</span><button id="sync-all" class="secondary">Sync all providers</button></div>
     </section>
 
+    <section aria-labelledby="coverage-heading">
+      <div class="section-heading"><div><p class="section-kicker">DISCOVERY TO CAPTURE</p><h2 id="coverage-heading">Conversation coverage</h2><p>Chats by date and capture status. Select a month to inspect its records.</p></div><button id="refresh-coverage" class="quiet-button">Refresh coverage</button></div>
+      <div class="coverage-legend"><span data-capture="captured">Captured</span><span data-capture="pending">Pending</span><span data-capture="failed">Failed</span><span data-capture="retained">Retained</span></div>
+      <p id="coverage-updated" class="small-note">Reading archive metadata…</p>
+      <div id="coverage-charts"></div>
+      <div class="coverage-filters">
+        <label>Provider<select id="coverage-provider"><option value="all">All providers</option><option value="chatgpt">ChatGPT</option><option value="grok">Grok</option><option value="claude">Claude</option><option value="gemini">Gemini</option><option value="ai-studio">AI Studio</option></select></label>
+        <label>Status<select id="coverage-status"><option value="all">All statuses</option><option value="captured">Captured</option><option value="pending">Pending</option><option value="failed">Failed</option><option value="retained">Retained</option></select></label>
+        <label class="coverage-search">Search title or ID<input id="coverage-search" type="search" placeholder="Find a conversation"></label>
+        <button id="coverage-clear" class="quiet-button">Clear filters</button>
+      </div>
+      <p id="coverage-selection" class="small-note"></p>
+      <div class="data-scroll"><table class="data-table"><thead><tr><th>Provider / conversation</th><th>Date</th><th>Capture</th></tr></thead><tbody id="coverage-records"></tbody></table></div>
+      <div class="table-pager"><button id="coverage-prev" class="quiet-button">Previous</button><span id="coverage-page"></span><button id="coverage-next" class="quiet-button">Next</button></div>
+      <p class="small-note">Creation date is used when available; updated and unknown dates are labeled. Retained means saved locally but absent from the latest inventory. These charts show discovered records, not proof that a provider exposed every chat.</p>
+    </section>
+
+    <section aria-labelledby="history-heading">
+      <div class="section-heading"><div><p class="section-kicker">MANUAL &amp; AUTOMATIC</p><h2 id="history-heading">Run history</h2><p>Persisted runs, phase details, counts and errors. Recording begins with this version.</p></div><button id="refresh-history" class="quiet-button">Refresh history</button></div>
+      <div id="run-history"></div>
+      <div class="table-pager"><button id="history-prev" class="quiet-button">Newer</button><span id="history-page"></span><button id="history-next" class="quiet-button">Older</button></div>
+    </section>
+
     <section aria-labelledby="replication-heading">
       <div class="section-heading"><div><p class="section-kicker">OPTIONAL COPY</p><h2 id="replication-heading">Replication</h2><p>Send changed archive files to a generic HTTPS receiver or an installed native host.</p></div></div>
       <div class="replication-line">
@@ -102,8 +125,11 @@
   <aside class="activity-rail" data-state="idle" aria-live="polite" aria-label="Current activity">
     <div class="activity-rail__heading"><span>ACTIVITY</span><i aria-hidden="true"></i></div>
     <p id="status" data-state="idle">Ready.</p>
+    <p id="run-overview" class="small-note">No run recorded yet.</p>
+    <div id="provider-progress"></div>
     <p id="scheduled-status">Checking automatic sync status…</p>
     <button id="cancel-sync" class="activity-cancel" hidden>Cancel sync</button>
+    <label class="check small-note"><input id="notify-runs" type="checkbox"> Notify when a run finishes</label>
   </aside>
   <script src="dashboard.js"></script>
 </body>

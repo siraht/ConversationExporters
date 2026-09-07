@@ -57,6 +57,40 @@ try {
   assert((await dashboard.locator('[data-archive="claude-web"] strong').textContent())?.includes("chat"), "Provider row did not render logical archive counts");
   assert((await dashboard.locator("#archive-status").textContent())?.includes("1 file"), "Archive toolbar did not render aggregate status");
   assert(await dashboard.locator("#how-to-heading").isVisible(), "How-to section did not render");
+  await dashboard.evaluate(async () => {
+    const database = await new Promise((resolve, reject) => {
+      const request = indexedDB.open("conversation-exporters-archives", 1);
+      request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
+    });
+    await new Promise((resolve, reject) => {
+      const transaction = database.transaction("files", "readwrite");
+      const store = transaction.objectStore("files");
+      for (const [path, value] of Object.entries({
+        "inventory.json": { conversations: [{ conversationId: "sample-one", title: "Captured example", createTime: "2025-01-02T00:00:00Z" }, { conversationId: "sample-two", title: "Pending example", createTime: "2025-02-02T00:00:00Z" }] },
+        "conversations/sample-one/complete.json": {},
+      })) store.put({ key: `grok-web/${path}`, bytes: new Blob([JSON.stringify(value)]) });
+      transaction.oncomplete = resolve; transaction.onerror = () => reject(transaction.error);
+    });
+    database.close();
+    const now = new Date().toISOString();
+    await chrome.storage.local.set({ "conversationExporters.runProgress": { runId: "smoke", trigger: "manual", status: "running", startedAt: now, providers: {
+      grok: { status: "running", phase: "capture", message: "Capturing sample conversations", discovered: 2, processed: 1, fetched: 1, phases: { discovery: { startedAt: now, updatedAt: now }, capture: { startedAt: now, updatedAt: now } } },
+      claude: { status: "running", phase: "discovery", message: "Listing sample history", discovered: 14 },
+    } } });
+  });
+  await dashboard.click("#refresh-coverage");
+  await dashboard.waitForFunction(() => document.querySelector("#coverage-selection")?.textContent?.includes("2 matching"));
+  assert(await dashboard.locator(".coverage-chart").count() === 5, "Missing provider charts");
+  assert(await dashboard.locator(".provider-progress").count() === 5, "Missing provider progress rows");
+  await dashboard.waitForFunction(() => document.querySelector("#run-overview")?.textContent?.includes("2 providers active"));
+  await dashboard.selectOption("#coverage-status", "pending");
+  assert((await dashboard.locator("#coverage-records").textContent()).includes("Pending example"), "Pending filter lost expected conversation");
+  assert(!(await dashboard.locator("#coverage-records").textContent()).includes("Captured example"), "Pending filter included a captured conversation");
+  await dashboard.click("#coverage-clear");
+  await dashboard.getByRole("button", { name: /^2025-01:/ }).click();
+  assert((await dashboard.locator("#coverage-selection").textContent()).includes("2025-01"), "Chart selection did not filter the table");
+  await dashboard.click("#coverage-clear");
+  await dashboard.locator('[aria-labelledby="coverage-heading"]').screenshot({ path: path.join(release, "coverage-smoke.png") });
   await dashboard.selectOption("#export-provider", "claude-web");
   const [download] = await Promise.all([dashboard.waitForEvent("download"), dashboard.click("#export-archive")]);
   const downloadPath = await download.path();
