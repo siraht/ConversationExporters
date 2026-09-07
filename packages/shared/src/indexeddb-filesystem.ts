@@ -64,7 +64,27 @@ export async function listBrowserArchiveEntries(namespace?: string): Promise<Bro
 }
 
 async function openDatabase(): Promise<IDBDatabase> { return await new Promise((resolve, reject) => { const request = indexedDB.open(DATABASE, 1); request.onupgradeneeded = () => request.result.createObjectStore(STORE, { keyPath: "key" }); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error!); }); }
-async function transact<T>(mode: IDBTransactionMode, operation: (store: IDBObjectStore, resolve: (value: T) => void, reject: (error: Error) => void) => void): Promise<T> { const db = await openDatabase(); try { return await new Promise<T>((resolve, reject) => operation(db.transaction(STORE, mode).objectStore(STORE), resolve, reject)); } finally { db.close(); } }
+async function transact<T>(mode: IDBTransactionMode, operation: (store: IDBObjectStore, resolve: (value: T) => void, reject: (error: Error) => void) => void): Promise<T> {
+  const db = await openDatabase();
+  try {
+    return await new Promise<T>((resolve, reject) => {
+      const transaction = db.transaction(STORE, mode);
+      let value: T;
+      let received = false;
+      // Request success precedes transaction commit. Never acknowledge a write
+      // that can still abort (for example, on quota exhaustion).
+      transaction.oncomplete = () => received ? resolve(value) : reject(new Error("Archive transaction completed without a result"));
+      transaction.onabort = () => reject(transaction.error ?? new Error("Archive transaction aborted"));
+      transaction.onerror = () => reject(transaction.error ?? new Error("Archive transaction failed"));
+      try {
+        operation(transaction.objectStore(STORE), (result) => { value = result; received = true; }, reject);
+      } catch (error) {
+        transaction.abort();
+        reject(error);
+      }
+    });
+  } finally { db.close(); }
+}
 
 function ownedBuffer(value: Uint8Array): ArrayBuffer {
   const copy = new Uint8Array(value.byteLength);
