@@ -1,6 +1,8 @@
 # ConversationExporters consolidation plan
 
-Status: complete
+Status: consolidation complete; account-wide completeness acceptance remains pending.
+
+The September 2026 completeness audit, corrections, commit timeline, limitations and manual acceptance checklist are tracked in [COMPLETENESS.html](COMPLETENESS.html). Earlier successful counts in this historical plan refer to discovered records, not proof that every provider conversation was discovered.
 
 Goal: consolidate the accepted GrokExporter and ChatGPTExporter implementations into one maintainable source tree while preserving complete private archives, provider-specific web semantics, least-privilege manifests, deterministic output, and independent releases.
 
