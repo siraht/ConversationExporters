@@ -12,8 +12,9 @@ import { GrokClient } from "../../grok-exporter/src/grok/client";
 import { BrowserAssetFetcher } from "../../grok-exporter/src/extension/asset-fetcher";
 import { RuntimeApiTransport as GrokTransport, type FindTabResult as GrokFindTabResult } from "../../grok-exporter/src/extension/protocol";
 import type { SyncSummary } from "./types";
+import type { ProviderProgress } from "./run-store";
 
-export type ProgressReporter = (message: string) => void;
+export type ProgressReporter = (message: string, progress?: Partial<ProviderProgress>) => void;
 export type CancellationRegistrar = (cancel: (() => void) | null) => void;
 export interface ManagedSyncDependencies {
   chatGptTransport(tabId: number): ChatGptTransportInterface;
@@ -36,17 +37,18 @@ export async function syncManagedGrok(report: ProgressReporter, registerCancella
   const filesystem = new IndexedDbArchiveFileSystem("grok-web");
   await filesystem.ready();
   try {
+    const progress = (event: ProgressEvent): void => report(`Grok · ${event.message}`, { phase: event.phase === "inventory" ? "discovery" : event.phase === "asset" ? "assets" : event.phase === "validation" ? "validation" : "capture", ...(event.phase === "inventory" && event.completed !== undefined ? { discovered: event.completed } : {}) });
     const client = new GrokClient({
       transport: dependencies.grokTransport(tab.tabId),
       settings: DEFAULT_CAPTURE_SETTINGS,
       cancellation: control,
-      onProgress: (event: ProgressEvent) => report(`Grok · ${event.message}`),
+      onProgress: progress,
     });
     const result = await new GrokCaptureEngine({
       client,
       filesystem,
       cancellation: control,
-      onProgress: (event) => report(`Grok · ${event.message}`),
+      onProgress: progress,
       assetFetcher: new BrowserAssetFetcher(),
     }).run();
     await dependencies.archiveChanged("grok-web");
@@ -101,9 +103,10 @@ export async function syncManagedChatGpt(report: ProgressReporter, registerCance
       transport: controlled,
       targets,
       settings: DEFAULT_INVENTORY_SETTINGS,
-      onProgress: (fingerprint, progress) => report(`ChatGPT · Inventory ${fingerprint.slice(0, 8)} · page ${progress.pageNumber} · ${progress.uniqueConversations} found`),
+      onProgress: (fingerprint, progress) => report(`ChatGPT · Inventory ${fingerprint.slice(0, 8)} · page ${progress.pageNumber} · ${progress.uniqueConversations} found`, { phase: "discovery" }),
     });
     const inventoryCount = [...inventories.values()].reduce((sum, inventory) => sum + inventory.conversations.length, 0);
+    report("ChatGPT · Inventory finished; capturing conversations and assets", { phase: "capture", discovered: inventoryCount });
     let fetched = 0, rebuilt = 0, unchanged = 0, failed = 0;
     for (const { workspace, filesystem } of targets) {
       const result = await new ChatGptCaptureEngine({
@@ -114,13 +117,13 @@ export async function syncManagedChatGpt(report: ProgressReporter, registerCance
         batchSize: 10,
         includeAssets: true,
         includeAccountArtifacts: true,
-        onProgress: (progress) => report(`ChatGPT · ${workspace.label} · ${progress.completed}/${progress.total} ${progress.phase}`),
+        onProgress: (progress) => report(`ChatGPT · ${workspace.label} · ${progress.completed}/${progress.total} ${progress.phase} (including assets)`, { phase: "capture" }),
       }).run();
       fetched += result.capturedCount;
       rebuilt += result.rebuiltCount;
       unchanged += result.skippedCount;
       failed += result.failedCount;
-      report(`ChatGPT · Validating ${workspace.label}…`);
+      report(`ChatGPT · Validating ${workspace.label}…`, { phase: "validation", fetched: fetched + rebuilt, unchanged, failed });
       const audit = await auditArchive({ filesystem, extensionVersion: chrome.runtime.getManifest().version });
       if (audit.terminalState !== "complete") failed += Math.max(1, audit.findings.filter((finding) => finding.severity === "error").length);
     }

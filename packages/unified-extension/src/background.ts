@@ -13,17 +13,19 @@ import type { DirectProvider, SyncProvider, StorageSettings, SyncSummary } from 
 import { syncManagedChatGpt, syncManagedGrok, type ManagedSyncDependencies } from "./managed-sync";
 import { GrokExporterError } from "../../grok-exporter/src/core/errors";
 import { syncFilesystem, testVps } from "./vps";
+import { beginRun, finishRun, recoverRun, runHistory, updateProvider, type ProviderProgress } from "./run-store";
 
 type JsonRecord = Record<string, unknown>;
 const SETTINGS_KEY = "conversationExporters.unifiedStorage";
 const ARCHIVES: NativeArchiveNamespace[] = ["chatgpt-web", "claude-web", "gemini-web", "google-ai-studio", "grok-web"];
 let active: Promise<unknown> | undefined;
-let cancelActive: (() => void) | null = null;
+const cancellations = new Map<SyncProvider, () => void>();
 let cancelled = false;
 const ACTIVE_SYNC_KEY = "conversationExporters.activeSync";
 const initialization = initializeBackground();
 
 async function initializeBackground(): Promise<void> {
+  await recoverRun();
   await recoverInterruptedSync();
   if (!await chrome.alarms.get("conversation-exporter-sync")) await chrome.alarms.create("conversation-exporter-sync", { periodInMinutes: 60 });
 }
@@ -54,7 +56,7 @@ export async function runScheduledSync(): Promise<void> {
   try {
     await initialization;
     await chrome.storage.local.set({ [key]: { status: "running", startedAt, providers: ["claude", "gemini", "ai-studio", "chatgpt", "grok"] } });
-    const results = await runExclusive(syncAll);
+    const results = await runExclusive(() => trackedSync(["claude", "gemini", "ai-studio", "chatgpt", "grok"], "scheduled"));
     const partial = cancelled || Object.values(results).some((result) => "error" in result || result.failed > 0);
     await chrome.storage.local.set({ [key]: { status: partial ? "partial" : "complete", startedAt, completedAt: new Date().toISOString(), results } });
   } catch (error) {
@@ -69,9 +71,10 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
   if (value.type === "CHATGPT_EXPORTER_API_REQUEST") { void chatGptRequest(value.tabId, value.request).then(sendResponse); return true; }
   if (value.type === "GROK_EXPORTER_FIND_TAB") { void findProviderTab(["https://grok.com/*"], "Open and sign in to Grok, then retry.").then(sendResponse); return true; }
   if (value.type === "GROK_EXPORTER_API_REQUEST") { void grokRequest(value as unknown as RuntimeApiRequest).then(sendResponse); return true; }
-  if (value.type === "UNIFIED_SYNC_PROVIDER") { respond(runExclusive(() => syncProvider(value.provider as SyncProvider)), sendResponse); return true; }
-  if (value.type === "UNIFIED_SYNC_ALL") { respond(runExclusive(syncAll), sendResponse); return true; }
-  if (value.type === "UNIFIED_CANCEL_SYNC") { cancelled = true; cancelActive?.(); sendResponse({ ok: true }); return false; }
+  if (value.type === "UNIFIED_SYNC_PROVIDER") { respond(runExclusive(async () => { const results = await trackedSync([value.provider as SyncProvider], "manual"); const result = results[String(value.provider)]!; if ("error" in result) throw new Error(result.error); return result; }), sendResponse); return true; }
+  if (value.type === "UNIFIED_SYNC_ALL") { respond(runExclusive(() => trackedSync(["claude", "gemini", "ai-studio", "chatgpt", "grok"], "manual")), sendResponse); return true; }
+  if (value.type === "UNIFIED_RUN_HISTORY") { respond(runHistory(Number(value.limit ?? 20), Number(value.offset ?? 0)), sendResponse); return true; }
+  if (value.type === "UNIFIED_CANCEL_SYNC") { cancelled = true; for (const cancel of cancellations.values()) cancel(); sendResponse({ ok: true }); return false; }
   if (value.type === "UNIFIED_GET_SETTINGS") { respond(publicSettings(), sendResponse, "settings"); return true; }
   if (value.type === "UNIFIED_SAVE_SETTINGS") { respond(saveSettings(value.settings), sendResponse); return true; }
   if (value.type === "UNIFIED_ARCHIVE_STATUS") { respond(archiveStatus(), sendResponse); return true; }
@@ -174,12 +177,16 @@ async function grokRequest(message: RuntimeApiRequest): Promise<GrokApiResponse>
   catch { return { requestId: message.request.requestId, protocolVersion: BRIDGE_PROTOCOL_VERSION, ok: false, error: { name: "ServiceWorkerError", message: "Reload Grok and retry.", code: "GROK_TAB_UNREACHABLE", retryable: true } }; }
 }
 
-async function syncAll(): Promise<Record<string, SyncSummary | { error: string }>> {
+async function trackedSync(providers: SyncProvider[], trigger: "manual" | "scheduled"): Promise<Record<string, SyncSummary | { error: string }>> {
+  if (providers.some((provider) => !["claude", "gemini", "ai-studio", "chatgpt", "grok"].includes(provider))) throw new Error("Unknown provider");
+  await beginRun(providers, trigger);
   const output: Record<string, SyncSummary | { error: string }> = {};
-  for (const provider of ["claude", "gemini", "ai-studio", "chatgpt", "grok"] as const) {
-    if (cancelled) break;
-    try { output[provider] = await syncProvider(provider); } catch (error) { output[provider] = { error: messageOf(error) }; }
-  }
+  try {
+    await forEachConcurrent(providers, 3, async (provider) => {
+      if (cancelled) return;
+      try { output[provider] = await syncProvider(provider); } catch (error) { output[provider] = { error: messageOf(error) }; }
+    });
+  } finally { await finishRun(cancelled); }
   return output;
 }
 
@@ -190,35 +197,43 @@ async function syncProvider(provider: SyncProvider): Promise<SyncSummary> {
   const startedAt = new Date().toISOString();
   let progressWrites = Promise.resolve();
   let lastProgress = 0;
-  const report = (message: string): void => {
+  const report = (message: string, patch: Partial<ProviderProgress> = {}): void => {
+    updateProvider(provider, { message, ...patch });
     if (Date.now() - lastProgress < 1000) return;
     lastProgress = Date.now();
     progressWrites = progressWrites.then(() => chrome.storage.local.set({ [ACTIVE_SYNC_KEY]: { provider, status: "running", startedAt, message } }));
   };
   try {
+    updateProvider(provider, { phase: "discovery", status: "running", startedAt, message: "Discovering provider inventory" });
     await chrome.storage.local.set({ [ACTIVE_SYNC_KEY]: { provider, status: "running", startedAt, message: `${provider}: discovering inventory` } });
     await writeJson(filesystem, "sync-report.json", { schemaVersion: 1, provider, status: "running", startedAt: new Date().toISOString() });
     await writeJson(filesystem, "validation.json", { schemaVersion: 2, provider, valid: false, status: "running", checkedAt: new Date().toISOString() });
-    const registerCancellation = (cancel: (() => void) | null): void => { cancelActive = cancel; if (cancelled) cancel?.(); };
+    const registerCancellation = (cancel: (() => void) | null): void => { if (cancel) cancellations.set(provider, cancel); else cancellations.delete(provider); if (cancelled) cancel?.(); };
     const summary = provider === "chatgpt" ? await syncManagedChatGpt(report, registerCancellation, managedDependencies) : provider === "grok" ? await syncManagedGrok(report, registerCancellation, managedDependencies) : provider === "claude" ? await syncClaude(filesystem) : provider === "gemini" ? await syncGemini(filesystem) : await syncAiStudio(filesystem);
+    updateProvider(provider, { phase: "validation", ...summary, message: "Saving validation result" });
     if (provider === "chatgpt" || provider === "grok") await writeJson(filesystem, "validation.json", { schemaVersion: 2, provider, scope: "discovered-inventory", valid: summary.failed === 0, discovered: summary.discovered, failed: summary.failed, checkedAt: new Date().toISOString() });
     await filesystem.writeTextAtomic("sync-report.json", JSON.stringify({ schemaVersion: 1, provider, status: summary.failed ? "partial" : "complete", completedAt: new Date().toISOString(), summary }));
     try {
+      updateProvider(provider, { phase: "replication", message: "Replicating to configured storage targets" });
       const replication = await syncArchive(namespace);
+      if (replication.failed) summary.failed += replication.failed;
       await writeJson(filesystem, "replication-report.json", { ...replication, status: replication.failed ? "partial" : "complete", checkedAt: new Date().toISOString() });
     } catch (error) {
+      summary.failed += 1;
       await writeJson(filesystem, "replication-report.json", { status: "failed", error: messageOf(error), checkedAt: new Date().toISOString() });
     }
     await progressWrites;
+    updateProvider(provider, { phase: "complete", status: summary.failed ? "partial" : "complete", completedAt: new Date().toISOString(), ...summary, message: summary.failed ? "Finished with failures; inspect reports" : "Sync and configured replication completed" });
     await chrome.storage.local.set({ [ACTIVE_SYNC_KEY]: { provider, status: summary.failed ? "partial" : "complete", startedAt, completedAt: new Date().toISOString(), summary } });
     return summary;
   } catch (error) {
+    updateProvider(provider, { status: cancelled ? "cancelled" : "failed", completedAt: new Date().toISOString(), message: messageOf(error) });
     await progressWrites;
     await chrome.storage.local.set({ [ACTIVE_SYNC_KEY]: { provider, status: "failed", startedAt, completedAt: new Date().toISOString(), error: messageOf(error) } });
     await writeJson(filesystem, "validation.json", { schemaVersion: 2, provider, valid: false, status: "failed", error: messageOf(error), checkedAt: new Date().toISOString() });
     await filesystem.writeTextAtomic("sync-report.json", JSON.stringify({ schemaVersion: 1, provider, status: "failed", completedAt: new Date().toISOString(), error: messageOf(error) })).catch(() => undefined);
     throw error;
-  } finally { cancelActive = null; }
+  } finally { cancellations.delete(provider); }
 }
 
 const managedDependencies: ManagedSyncDependencies = {
@@ -242,6 +257,7 @@ async function syncClaude(filesystem: ArchiveFileSystem): Promise<SyncSummary> {
   const organizations = asRecords(await pageRequest("https://claude.ai/*", "claudeAccount"));
   await writeJson(filesystem, "source/organizations.json", organizations);
   const listing = asRecords(await pageRequest("https://claude.ai/*", "claudeList"));
+  updateProvider("claude", { discovered: listing.length, message: "Discovering projects and their conversations" });
   await writeJson(filesystem, "inventory.json", { schema: "conversation-exporters/claude-web/3", organizations, conversations: listing });
   let fetched = 0, unchanged = 0, failed = 0;
 
@@ -297,12 +313,14 @@ async function syncClaude(filesystem: ArchiveFileSystem): Promise<SyncSummary> {
     const id = text(row.uuid), organizationId = text(row._organization_uuid); if (!id || !organizationId) { failed += 1; continue; }
     const root = `conversations/${pathSegment(id)}`;
     const prior = await readJson<JsonRecord>(filesystem, `${root}/metadata.json`, {});
+    updateProvider("claude", { phase: "capture", discovered: listing.length, fetched, unchanged, failed, message: `Checking conversations: ${fetched + unchanged} saved or unchanged of ${listing.length}` });
     if (await canSkipCapture(filesystem, root, prior.updated_at, row.updated_at)) { unchanged += 1; continue; }
     try {
       const detail = { ...asRecord(await pageRequest("https://claude.ai/*", "claudeDetail", { organizationId, conversationId: id })), _organization_uuid: organizationId };
       await writeJson(filesystem, `${root}/metadata.json`, row);
       await writeJson(filesystem, `${root}/conversation.json`, detail);
       const files = claudeFiles(detail);
+      if (files.length) updateProvider("claude", { phase: "assets", message: `Downloading ${files.length} assets for current conversation` });
       const assetManifest: JsonRecord[] = [];
       for (const [index, file] of files.entries()) {
         try {
@@ -345,6 +363,7 @@ async function syncGemini(filesystem: ArchiveFileSystem): Promise<SyncSummary> {
     if (id && !listingById.has(id)) listingById.set(id, { id, title: text(row.title) ?? "Untitled", updated_at: row.updated_at ?? null });
   }
   const listing = [...listingById.values()];
+  updateProvider("gemini", { discovered: listing.length, message: "Inventory found; exporting account and Gems" });
   await writeJson(filesystem, "inventory.json", {
     schema: "conversation-exporters/gemini-web/3",
     sourceListingCount: liveListing.length,
@@ -368,6 +387,7 @@ async function syncGemini(filesystem: ArchiveFileSystem): Promise<SyncSummary> {
     await writeJson(filesystem, "gems/error.json", { error: messageOf(error), failedAt: new Date().toISOString() });
   }
   await forEachConcurrent(listing, 2, async (row) => {
+    updateProvider("gemini", { phase: "capture", fetched, unchanged, failed, message: `Capturing conversations and assets: ${fetched + unchanged} saved or unchanged of ${listing.length}` });
     if (cancelled) throw new Error("Sync cancelled");
     const id = text(row.id); if (!id) return;
     const root = `conversations/${pathSegment(id)}`;
@@ -381,6 +401,7 @@ async function syncGemini(filesystem: ArchiveFileSystem): Promise<SyncSummary> {
       await writeJson(filesystem, `${root}/metadata.json`, row);
       await writeJson(filesystem, `${root}/conversation.json`, record);
       const assets = providerAssetUrls(detail);
+      if (assets.length) updateProvider("gemini", { phase: "assets", message: `Downloading assets (${assets.length} for this conversation); captures may overlap` });
       const assetManifest = await downloadProviderAssets(filesystem, root, assets, "https://gemini.google.com/*", "geminiAsset");
       await writeJson(filesystem, `${root}/assets.json`, assetManifest);
       const incomplete = detail.possibly_truncated === true || assetManifest.some((asset) => asset.error);
@@ -402,9 +423,11 @@ async function syncGemini(filesystem: ArchiveFileSystem): Promise<SyncSummary> {
 async function syncAiStudio(filesystem: ArchiveFileSystem): Promise<SyncSummary> {
   const inventoryRows = asArrays(await pageRequest("https://aistudio.google.com/*", "aiStudioInventory"));
   const prompts = inventoryRows.map((inventory) => ({ id: text(inventory[0]), inventory }));
+  updateProvider("ai-studio", { discovered: prompts.length, message: "Prompt inventory discovered" });
   await writeJson(filesystem, "inventory.json", { schema: "conversation-exporters/ai-studio-web/3", prompts });
   let fetched = 0, unchanged = 0, failed = 0;
   for (const raw of prompts) {
+    updateProvider("ai-studio", { phase: "capture", fetched, unchanged, failed, message: `Checking prompts: ${fetched + unchanged} saved or unchanged of ${prompts.length}` });
     if (cancelled) throw new Error("Sync cancelled");
     const id = text(raw.id); if (!id) continue;
     const root = `prompts/${pathSegment(id)}`;
@@ -420,6 +443,7 @@ async function syncAiStudio(filesystem: ArchiveFileSystem): Promise<SyncSummary>
       const ownDriveId = id.split("/").at(-1);
       const driveIds = providerDriveIds(assetSource).filter((candidate) => candidate !== ownDriveId);
       const urls = providerAssetUrls(assetSource);
+      if (driveIds.length + urls.length) updateProvider("ai-studio", { phase: "assets", message: `Downloading ${driveIds.length + urls.length} assets for current prompt` });
       const assetManifest: JsonRecord[] = [];
       for (const [index, driveId] of driveIds.entries()) {
         try {
@@ -598,6 +622,7 @@ export async function canSkipCapture(filesystem: ArchiveFileSystem, root: string
 }
 
 export async function writeValidation(filesystem: ArchiveFileSystem, provider: DirectProvider, ids: Array<string | undefined>, directory: string, failures = 0): Promise<boolean> {
+  updateProvider(provider, { phase: "validation", message: "Checking discovered inventory against saved completion markers" });
   const paths = new Set(await filesystem.listPaths());
   const expected = new Set(ids.filter((id): id is string => Boolean(id)));
   const missingIds = [...expected].filter((id) => !paths.has(`${directory}/${pathSegment(id)}/complete.json`));
