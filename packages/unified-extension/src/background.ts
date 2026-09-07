@@ -223,6 +223,7 @@ async function syncProvider(provider: SyncProvider): Promise<SyncSummary> {
       await writeJson(filesystem, "replication-report.json", { status: "failed", error: messageOf(error), checkedAt: new Date().toISOString() });
     }
     await progressWrites;
+    await writeJson(filesystem, "sync-report.json", { schemaVersion: 2, provider, status: summary.failed ? "partial" : "complete", startedAt, completedAt: new Date().toISOString(), summary, replicationIncluded: true });
     updateProvider(provider, { phase: "complete", status: summary.failed ? "partial" : "complete", completedAt: new Date().toISOString(), ...summary, message: summary.failed ? "Finished with failures; inspect reports" : "Sync and configured replication completed" });
     await chrome.storage.local.set({ [ACTIVE_SYNC_KEY]: { provider, status: summary.failed ? "partial" : "complete", startedAt, completedAt: new Date().toISOString(), summary } });
     return summary;
@@ -308,13 +309,14 @@ async function syncClaude(filesystem: ArchiveFileSystem): Promise<SyncSummary> {
     }
   }
 
+  let processed = 0;
   for (const row of listing) {
     if (cancelled) throw new Error("Sync cancelled");
-    const id = text(row.uuid), organizationId = text(row._organization_uuid); if (!id || !organizationId) { failed += 1; continue; }
+    const id = text(row.uuid), organizationId = text(row._organization_uuid); if (!id || !organizationId) { failed += 1; processed += 1; continue; }
     const root = `conversations/${pathSegment(id)}`;
     const prior = await readJson<JsonRecord>(filesystem, `${root}/metadata.json`, {});
     updateProvider("claude", { phase: "capture", discovered: listing.length, fetched, unchanged, failed, message: `Checking conversations: ${fetched + unchanged} saved or unchanged of ${listing.length}` });
-    if (await canSkipCapture(filesystem, root, prior.updated_at, row.updated_at)) { unchanged += 1; continue; }
+    if (await canSkipCapture(filesystem, root, prior.updated_at, row.updated_at)) { unchanged += 1; processed += 1; updateProvider("claude", { processed, unchanged }); continue; }
     try {
       const detail = { ...asRecord(await pageRequest("https://claude.ai/*", "claudeDetail", { organizationId, conversationId: id })), _organization_uuid: organizationId };
       await writeJson(filesystem, `${root}/metadata.json`, row);
@@ -344,6 +346,8 @@ async function syncClaude(filesystem: ArchiveFileSystem): Promise<SyncSummary> {
       failed += 1;
       await writeJson(filesystem, `${root}/error.json`, { error: messageOf(error), failedAt: new Date().toISOString() });
     }
+    processed += 1;
+    updateProvider("claude", { processed, fetched, unchanged, failed });
     await delay(150);
   }
   await writeJson(filesystem, "inventory.json", { schema: "conversation-exporters/claude-web/3", organizations, conversations: listing });
@@ -386,13 +390,14 @@ async function syncGemini(filesystem: ArchiveFileSystem): Promise<SyncSummary> {
     failed += 1;
     await writeJson(filesystem, "gems/error.json", { error: messageOf(error), failedAt: new Date().toISOString() });
   }
+  let processed = 0;
   await forEachConcurrent(listing, 2, async (row) => {
     updateProvider("gemini", { phase: "capture", fetched, unchanged, failed, message: `Capturing conversations and assets: ${fetched + unchanged} saved or unchanged of ${listing.length}` });
     if (cancelled) throw new Error("Sync cancelled");
     const id = text(row.id); if (!id) return;
     const root = `conversations/${pathSegment(id)}`;
     const prior = await readJson<JsonRecord>(filesystem, `${root}/metadata.json`, {});
-    if (await canSkipCapture(filesystem, root, prior.updated_at, row.updated_at)) { unchanged += 1; return; }
+    if (await canSkipCapture(filesystem, root, prior.updated_at, row.updated_at)) { unchanged += 1; processed += 1; updateProvider("gemini", { processed, unchanged }); return; }
     try {
       const detail = asRecord(await pageRequest("https://gemini.google.com/*", "geminiDetail", { conversationId: id }));
       if (!Array.isArray(detail.messages) || !detail.messages.length) throw new Error("Gemini rendered no messages for a listed conversation");
@@ -414,6 +419,8 @@ async function syncGemini(filesystem: ArchiveFileSystem): Promise<SyncSummary> {
       failed += 1;
       await writeJson(filesystem, `${root}/error.json`, { error: messageOf(error), failedAt: new Date().toISOString() });
     }
+    processed += 1;
+    updateProvider("gemini", { processed, fetched, unchanged, failed });
     await delay(250);
   });
   if (!await writeValidation(filesystem, "gemini", listing.map((row) => text(row.id)), "conversations", failed)) failed = Math.max(failed, 1);
@@ -426,16 +433,17 @@ async function syncAiStudio(filesystem: ArchiveFileSystem): Promise<SyncSummary>
   updateProvider("ai-studio", { discovered: prompts.length, message: "Prompt inventory discovered" });
   await writeJson(filesystem, "inventory.json", { schema: "conversation-exporters/ai-studio-web/3", prompts });
   let fetched = 0, unchanged = 0, failed = 0;
+  let processed = 0;
   for (const raw of prompts) {
     updateProvider("ai-studio", { phase: "capture", fetched, unchanged, failed, message: `Checking prompts: ${fetched + unchanged} saved or unchanged of ${prompts.length}` });
     if (cancelled) throw new Error("Sync cancelled");
-    const id = text(raw.id); if (!id) continue;
+    const id = text(raw.id); if (!id) { processed += 1; updateProvider("ai-studio", { processed }); continue; }
     const root = `prompts/${pathSegment(id)}`;
     try {
       const detail = await pageRequest("https://aistudio.google.com/*", "aiStudioDetail", { inventory: raw.inventory });
       const hash = await sha256Hex(JSON.stringify({ inventory: raw.inventory, detail }));
       const complete = await readJson<JsonRecord>(filesystem, `${root}/complete.json`, {});
-      if (complete.sourceHash === hash && complete.assetDiscoveryVersion === 2) { unchanged += 1; await removeIfExists(filesystem, `${root}/error.json`); continue; }
+      if (complete.sourceHash === hash && complete.assetDiscoveryVersion === 2) { unchanged += 1; processed += 1; updateProvider("ai-studio", { processed, unchanged }); await removeIfExists(filesystem, `${root}/error.json`); continue; }
       const metadata = Array.isArray(raw.inventory[4]) ? raw.inventory[4] : [];
       const record = { id, title: text(metadata[0]) || text(metadata[1]) || "Untitled", hash, inventory: raw.inventory, detail };
       await writeJson(filesystem, `${root}/prompt.json`, record);
@@ -464,6 +472,8 @@ async function syncAiStudio(filesystem: ArchiveFileSystem): Promise<SyncSummary>
       failed += 1;
       await writeJson(filesystem, `${root}/error.json`, { error: messageOf(error), failedAt: new Date().toISOString() });
     }
+    processed += 1;
+    updateProvider("ai-studio", { processed, fetched, unchanged, failed });
   }
   if (!await writeValidation(filesystem, "ai-studio", prompts.map((row) => row.id), "prompts", failed)) failed = Math.max(failed, 1);
   return { provider: "ai-studio", discovered: prompts.length, fetched, unchanged, retained: 0, failed };

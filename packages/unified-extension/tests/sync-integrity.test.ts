@@ -82,6 +82,18 @@ describe("timestamp freshness", () => {
 });
 
 describe("background lifecycle", () => {
+  it("runs three independent provider slots while keeping queued work bounded", async () => {
+    let running = 0, maximum = 0;
+    const finished: number[] = [];
+    await background.forEachConcurrent([1, 2, 3, 4, 5], 3, async (provider) => {
+      running += 1; maximum = Math.max(maximum, running);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      finished.push(provider); running -= 1;
+    });
+    expect(maximum).toBe(3);
+    expect(finished.sort()).toEqual([1, 2, 3, 4, 5]);
+    expect(running).toBe(0);
+  });
   it("drains in-flight workers before releasing a failed concurrent sync", async () => {
     let finish!: () => void;
     let settled = false;

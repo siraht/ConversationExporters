@@ -69,7 +69,7 @@ export async function finishRun(cancelled = false): Promise<void> {
   await persist();
   const settings = await chrome.storage.local.get("conversationExporters.notificationsEnabled");
   if (settings["conversationExporters.notificationsEnabled"] === true && await chrome.permissions.contains({ permissions: ["notifications"] })) {
-    await chrome.notifications.create({ type: "basic", iconUrl: chrome.runtime.getURL("provider-icons/chatgpt.svg"), title: "Conversation Archive", message: `Sync ${current.status}. ${Object.values(current.providers).filter((state) => state.status === "complete").length} of ${Object.keys(current.providers).length} providers completed. Open the dashboard for details.` }).catch(() => undefined);
+    await chrome.notifications.create({ type: "basic", iconUrl: chrome.runtime.getURL("icon-128.png"), title: "Conversation Archive", message: `Sync ${current.status}. ${Object.values(current.providers).filter((state) => state.status === "complete").length} of ${Object.keys(current.providers).length} providers completed. Open the dashboard for details.` }).catch(() => undefined);
   }
 }
 export async function recoverRun(): Promise<void> {
@@ -77,7 +77,16 @@ export async function recoverRun(): Promise<void> {
   if (prior?.status !== "running") return;
   current = prior;
   const now = new Date().toISOString();
-  for (const state of Object.values(current.providers)) if (state.status === "running" || state.status === "queued") Object.assign(state, { status: "interrupted", completedAt: now, message: "Background stopped; sync again to resume saved records" });
+  for (const [provider, state] of Object.entries(current.providers)) {
+    if (state.status !== "running" && state.status !== "queued") continue;
+    // Queued providers have not touched their archives; preserve their previous validation.
+    if (state.status === "running") {
+      const filesystem = new IndexedDbArchiveFileSystem(provider === "ai-studio" ? "google-ai-studio" : `${provider}-web`);
+      await filesystem.writeTextAtomic("sync-report.json", JSON.stringify({ schemaVersion: 1, provider, status: "interrupted", completedAt: now }));
+      await filesystem.writeTextAtomic("validation.json", JSON.stringify({ schemaVersion: 2, provider, valid: false, status: "interrupted", checkedAt: now }));
+    }
+    Object.assign(state, { status: "interrupted", completedAt: now, message: "Background stopped; sync again to resume saved records" });
+  }
   current.status = "interrupted"; current.completedAt = now;
   await persist();
 }
