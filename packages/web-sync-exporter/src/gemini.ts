@@ -1,3 +1,4 @@
+import { inventoryCursor } from "./inventory";
 export interface GeminiListItem { id: string; title: string; updated_at: string | null }
 export interface GeminiMessage { id: string; role: "user" | "assistant"; content: string }
 
@@ -8,19 +9,17 @@ export interface GeminiDetail {
 }
 
 export function parseGeminiResponse(text: string): { cursor: string | null; items: GeminiListItem[] } {
-  try {
     const inner = rpcPayload(text, "MaZiqc");
-    if (!inner) return { cursor: null, items: [] };
-    const rows = Array.isArray(inner[2]) ? inner[2] : [];
+    if (!Array.isArray(inner) || !Array.isArray(inner[2])) throw new Error("Gemini inventory response was malformed or missing");
+    const rows = inner[2];
     const items = rows.flatMap((row) => {
-      if (!Array.isArray(row)) return [];
-      const id = String(row[0] ?? "").replace(/^c_/, "");
-      if (!id) return [];
+      if (!Array.isArray(row) || typeof row[0] !== "string") throw new Error("Gemini inventory record was malformed");
+      const id = row[0].replace(/^c_/, "");
+      if (!id) throw new Error("Gemini inventory record lacks an identity");
       const updated_at = Array.isArray(row[5]) && typeof row[5][0] === "number" ? new Date(row[5][0] * 1000).toISOString() : null;
       return [{ id, title: String(row[1] ?? "Untitled").trim() || "Untitled", updated_at }];
     });
-    return { cursor: typeof inner[1] === "string" ? inner[1] : null, items };
-  } catch { return { cursor: null, items: [] }; }
+    return { cursor: inventoryCursor(inner[1], "Gemini"), items };
 }
 
 export function parseGeminiChatResponse(text: string, conversationId: string, limit: number): GeminiDetail {

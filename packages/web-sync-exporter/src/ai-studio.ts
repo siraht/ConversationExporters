@@ -1,3 +1,4 @@
+import { collectInventory, inventoryCursor } from "./inventory";
 type JsonMessage = unknown[] | Record<string, unknown>;
 
 interface CapturedRequest {
@@ -43,18 +44,13 @@ export async function listAiStudioPromptInventory(): Promise<unknown[][]> {
   if (!originalFetch) throw new Error("AI Studio page bridge is unavailable");
   if (!listTemplate) throw new Error("AI Studio prompt inventory is not initialized. Open or refresh AI Studio's prompt history, then retry.");
   if (!getTemplate) throw new Error("AI Studio prompt detail is not initialized. Open one saved prompt after refreshing AI Studio, then retry.");
-  const output = new Map<string, unknown[]>();
-  let cursor: string | null = null;
-  for (let page = 0; page < 200; page += 1) {
+  const inventories = await collectInventory("AI Studio", async (cursor) => {
     const body = withMessageFields(listTemplate.body, { 0: 100, 1: cursor });
     const response = await requestPage(listTemplate, body, "inventory");
     const parsed = parsePromptPage(response);
-    for (const prompt of parsed.prompts) output.set(promptIdentity(prompt), prompt);
-    if (!parsed.cursor || parsed.cursor === cursor) break;
-    cursor = parsed.cursor;
-  }
-  if (!output.size) throw new Error("AI Studio returned no saved prompts");
-  const inventories = [...output.values()];
+    return { items: parsed.prompts, cursor: parsed.cursor };
+  }, promptIdentity);
+  if (!inventories.length) return [];
   const reference = messageField(getTemplate.body, 0);
   promptReferenceLocator = getTemplate.url.includes("MakerSuiteService/ResolveDriveResource") && typeof reference === "string"
     ? locatePromptReference(inventories, reference)
@@ -85,10 +81,13 @@ export function parsePromptPage(value: unknown): { prompts: unknown[][]; cursor:
   if (!isJsonMessage(value)) throw new Error("AI Studio prompt inventory was malformed");
   const promptValue = messageField(value, 0);
   const cursorValue = messageField(value, 1);
-  const prompts = Array.isArray(promptValue)
-    ? promptValue.filter((item): item is unknown[] => Array.isArray(item) && typeof item[0] === "string")
-    : [];
-  return { prompts, cursor: typeof cursorValue === "string" && cursorValue ? cursorValue : null };
+  if (!Array.isArray(promptValue)) throw new Error("AI Studio prompt inventory rows were malformed");
+  const prompts = promptValue.map((item): unknown[] => {
+    if (!Array.isArray(item)) throw new Error("AI Studio prompt inventory record was malformed");
+    promptIdentity(item);
+    return item;
+  });
+  return { prompts, cursor: inventoryCursor(cursorValue, "AI Studio") };
 }
 
 export function promptIdentity(prompt: unknown[]): string {

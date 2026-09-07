@@ -1,4 +1,5 @@
 import { safeToken, type PageReply, type PageRequest } from "./protocol";
+import { claudeNextLink, claudeRows, collectInventory } from "./inventory";
 import { parseGeminiChatResponse, parseGeminiResponse, rpcPayload } from "./gemini";
 import { getAiStudioPromptDetail, installAiStudioCapture, listAiStudioPromptInventory, listAiStudioPrompts } from "./ai-studio";
 
@@ -45,16 +46,19 @@ async function claudeList(): Promise<Record<string, unknown>[]> {
   if (location.hostname !== "claude.ai") throw new Error("wrong provider tab");
   const organizationsResponse = await fetch("/api/organizations", { credentials: "include" });
   if (!organizationsResponse.ok) throw new Error(`Claude authentication failed (${organizationsResponse.status})`);
-  const organizations = await organizationsResponse.json() as Array<{ uuid?: string }>;
+  const organizations = claudeRows(await organizationsResponse.json(), "Claude organization");
   const output: Record<string, unknown>[] = [];
   for (const organization of organizations) {
-    if (!organization.uuid) continue;
-    const response = await fetch(`/api/organizations/${encodeURIComponent(organization.uuid)}/chat_conversations`, { credentials: "include" });
-    if (!response.ok) continue;
-    const rows: unknown = await response.json();
-    if (Array.isArray(rows)) for (const row of rows) if (row && typeof row === "object") output.push({ ...row, _organization_uuid: organization.uuid });
+    const organizationId = String(organization.uuid);
+    const initial = `/api/organizations/${encodeURIComponent(organizationId)}/chat_conversations`;
+    const rows = await collectInventory("Claude", async (cursor) => {
+      const url = cursor ?? initial;
+      const response = await fetch(url, { credentials: "include" });
+      if (!response.ok) throw new Error(`Claude organization conversation inventory failed (${response.status})`);
+      return { items: claudeRows(await response.json(), "Claude conversation"), cursor: claudeNextLink(response.headers.get("Link"), url) };
+    }, (row) => String(row.uuid));
+    output.push(...rows.map((row) => ({ ...row, _organization_uuid: organizationId })));
   }
-  if (!output.length) throw new Error("Claude returned no conversation inventory");
   return output;
 }
 
@@ -105,20 +109,15 @@ async function claudeDetail(parameters: Record<string, unknown> | undefined): Pr
 async function geminiList(): Promise<Array<{ id: string; title: string; updated_at: string | null }>> {
   if (location.hostname !== "gemini.google.com") throw new Error("wrong provider tab");
   const session = geminiSession();
-  const output = new Map<string, { id: string; title: string; updated_at: string | null }>();
-  let cursor: string | null = null;
-  for (let page = 0; page < 200; page += 1) {
+  return await collectInventory("Gemini", async (cursor) => {
     const argument = cursor === null ? [13, null, [0, null, 1]] : [20, cursor, [0, null, 1]];
     const request = JSON.stringify([[['MaZiqc', JSON.stringify(argument), null, 'generic']]]);
     const url = `/_/BardChatUi/data/batchexecute?rpcids=MaZiqc&source-path=%2Fapp&bl=${encodeURIComponent(session.bl)}&f.sid=${encodeURIComponent(session.sid)}&hl=en&_reqid=${Math.floor(Math.random() * 900000) + 100000}&rt=c`;
     const response = await fetch(url, { method: "POST", credentials: "include", headers: { "Content-Type": "application/x-www-form-urlencoded;charset=utf-8", "X-Same-Domain": "1" }, body: `f.req=${encodeURIComponent(request)}&at=${encodeURIComponent(session.at)}` });
     if (!response.ok) throw new Error(`Gemini inventory failed (${response.status})`);
     const parsed = parseGeminiResponse(await response.text());
-    for (const item of parsed.items) if (!output.has(item.id)) output.set(item.id, item);
-    if (!parsed.cursor || parsed.cursor === cursor) break;
-    cursor = parsed.cursor;
-  }
-  return [...output.values()];
+    return parsed;
+  }, (item) => item.id);
 }
 
 async function geminiDetail(parameters: Record<string, unknown> | undefined): Promise<unknown> {
