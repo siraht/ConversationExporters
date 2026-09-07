@@ -24,10 +24,11 @@ export function parseGeminiResponse(text: string): { cursor: string | null; item
 
 export function parseGeminiChatResponse(text: string, conversationId: string, limit: number): GeminiDetail {
   const body = rpcPayload(text, "hNvQHb");
-  const turns = body && Array.isArray(body[0]) ? body[0] : [];
+  if (!Array.isArray(body) || !Array.isArray(body[0])) throw new Error("Gemini conversation response was malformed or missing");
+  const turns = body[0];
   const messages: GeminiMessage[] = [];
   for (const [index, turn] of turns.map((value, index) => [index, value] as const).reverse()) {
-    if (!Array.isArray(turn)) continue;
+    if (!Array.isArray(turn)) throw new Error("Gemini conversation contains a malformed turn");
     const user = nested(turn, [2, 0]);
     if (Array.isArray(user)) {
       const content = typeof user[0] === "string" && user[0].trim()
@@ -38,7 +39,7 @@ export function parseGeminiChatResponse(text: string, conversationId: string, li
     const candidates = nested(turn, [3, 0]);
     if (!Array.isArray(candidates)) continue;
     for (const [candidateIndex, candidate] of candidates.entries()) {
-      if (!Array.isArray(candidate) || !candidate[0]) continue;
+      if (!Array.isArray(candidate) || typeof candidate[0] !== "string" || !candidate[0]) throw new Error("Gemini conversation contains a malformed response candidate");
       const textValue = nested(candidate, [1, 0]);
       const content = typeof textValue === "string" && textValue.trim()
         ? textValue.trim()

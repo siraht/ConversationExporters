@@ -21,14 +21,23 @@ export function inventoryCursor(value: unknown, label: string): string | null {
   return value;
 }
 
-export function claudeRows(value: unknown, label: string): Record<string, unknown>[] {
+export function claudeRows(value: unknown, label: string, allowId = false): Record<string, unknown>[] {
   if (!Array.isArray(value)) throw new Error(`${label} inventory format is unsupported; completeness cannot be established`);
   return value.map((row) => {
-    if (!row || typeof row !== "object" || Array.isArray(row) || typeof row.uuid !== "string" || !row.uuid) {
+    if (!row || typeof row !== "object" || Array.isArray(row) || !(typeof row.uuid === "string" && row.uuid || allowId && typeof row.id === "string" && row.id)) {
       throw new Error(`${label} inventory contains a record without an identity`);
     }
     return row as Record<string, unknown>;
   });
+}
+
+export async function fetchClaudeInventory(url: string, label: string, fetcher: typeof fetch = fetch, allowId = false): Promise<Record<string, unknown>[]> {
+  return await collectInventory(label, async (cursor) => {
+    const current = cursor ?? url;
+    const response = await fetcher(current, { credentials: "include", headers: { accept: "application/json" } });
+    if (!response.ok) throw new Error(`${label} inventory failed (${response.status})`);
+    return { items: claudeRows(await response.json(), label, allowId), cursor: claudeNextLink(response.headers.get("Link"), current) };
+  }, (row) => String(row.uuid ?? row.id));
 }
 
 /** Follow only provider-issued next links, never guessed offset/cursor parameters. */

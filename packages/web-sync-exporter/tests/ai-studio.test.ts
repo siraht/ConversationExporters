@@ -6,9 +6,15 @@ import {
   promptReferenceAt,
   promptRequestBody,
   promptRpcKind,
+  validatePromptDetail,
 } from "../src/ai-studio";
 
 describe("AI Studio prompt RPC", () => {
+  it("rejects empty and error detail bodies while preserving raw prompt structures", () => {
+    for (const value of [null, "login", [], {}, { error: { code: 403 } }]) expect(() => validatePromptDetail(value)).toThrow();
+    const raw = { "0": ["opaque prompt", { settings: true }] };
+    expect(validatePromptDetail(raw)).toBe(raw);
+  });
   it("parses full prompt records and pagination cursor", () => {
     const result = parsePromptPage([[['prompts/one', null], ['prompts/two', { raw: true }]], 'next']);
     expect(result.prompts).toHaveLength(2);

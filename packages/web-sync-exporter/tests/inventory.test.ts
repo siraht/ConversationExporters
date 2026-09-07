@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { claudeNextLink, claudeRows, collectInventory } from "../src/inventory";
+import { claudeNextLink, claudeRows, collectInventory, fetchClaudeInventory } from "../src/inventory";
 import { parseGeminiResponse } from "../src/gemini";
 import { parsePromptPage } from "../src/ai-studio";
 
@@ -52,5 +52,18 @@ describe("strict provider inventory parsing", () => {
     expect(claudeNextLink(null, url)).toBeNull();
     expect(() => claudeNextLink('<https://evil.test/>; rel="next"', url)).toThrow();
     expect(() => claudeNextLink('</other>; rel="next"', url)).toThrow();
+  });
+  it("collects Claude project/docs pages and surfaces later failures", async () => {
+    const url = "https://claude.ai/api/organizations/org/projects";
+    const requested: string[] = [];
+    const fetcher = (async (input) => {
+      requested.push(String(input));
+      return requested.length === 1
+        ? new Response(JSON.stringify([{ id: "one" }]), { headers: { Link: '<?cursor=two>; rel="next"' } })
+        : new Response(JSON.stringify([{ id: "two" }]));
+    }) as typeof fetch;
+    expect(await fetchClaudeInventory(url, "Claude projects", fetcher, true)).toHaveLength(2);
+    expect(requested).toEqual([url, `${url}?cursor=two`]);
+    await expect(fetchClaudeInventory(url, "Claude projects", (async () => new Response("blocked", { status: 403 })) as typeof fetch)).rejects.toThrow("403");
   });
 });

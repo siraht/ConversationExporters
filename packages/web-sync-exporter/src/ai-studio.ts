@@ -70,7 +70,15 @@ export async function getAiStudioPromptDetail(value: unknown): Promise<unknown> 
   const id = promptIdentity(value);
   const detailReference = promptReferenceLocator ? promptReferenceAt(value, promptReferenceLocator) : id;
   if (!detailReference) throw new Error(`AI Studio prompt ${id} lacks the expected Drive reference`);
-  return await requestPage(capturedGet, promptRequestBody(capturedGet.body, detailReference), "prompt detail");
+  return validatePromptDetail(await requestPage(capturedGet, promptRequestBody(capturedGet.body, detailReference), "prompt detail"));
+}
+
+/** Preserve the opaque provider payload, but never accept an error/empty payload as a prompt. */
+export function validatePromptDetail(value: unknown): JsonMessage {
+  if (!isJsonMessage(value) || !Object.keys(value).length || !Array.isArray(value) && "error" in value) {
+    throw new Error("AI Studio prompt detail was empty, malformed, or a provider error");
+  }
+  return value;
 }
 
 export function promptRequestBody(template: JsonMessage, id: string): JsonMessage {

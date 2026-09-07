@@ -10,6 +10,18 @@ describe("Gemini list protocol", () => {
 });
 
 describe("Gemini read-chat protocol", () => {
+  const frame = (value: unknown) => JSON.stringify([["wrb.fr", "hNvQHb", JSON.stringify(value), null]]);
+  it("flags the requested turn ceiling as incomplete and retains every supplied candidate", () => {
+    const turn = [null, null, [["question"]], [[["a", ["answer A"]], ["b", ["answer B"]]]]];
+    const parsed = parseGeminiChatResponse(frame([[turn]]), "chat", 1);
+    expect(parsed.possibly_truncated).toBe(true);
+    expect(parsed.messages.map((item) => item.content)).toEqual(["question", "answer A", "answer B"]);
+  });
+  it("does not normalize malformed detail responses into apparently complete content", () => {
+    for (const value of ["<!DOCTYPE html>", frame({}), frame([[null]]), frame([[[null, null, [["q"]], [[[null]]]]]])]) {
+      expect(() => parseGeminiChatResponse(value, "chat", 1000)).toThrow();
+    }
+  });
   it("normalizes newest-first RPC turns into chronological messages and retains the raw payload", () => {
     const older = [null, null, [["older user"]], [[[
       "older-model-id", ["older answer"], null, null, null, null, null, null, [2],

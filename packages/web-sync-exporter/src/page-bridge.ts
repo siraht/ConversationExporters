@@ -1,5 +1,5 @@
 import { safeToken, type PageReply, type PageRequest } from "./protocol";
-import { claudeNextLink, claudeRows, collectInventory } from "./inventory";
+import { claudeRows, collectInventory, fetchClaudeInventory } from "./inventory";
 import { parseGeminiChatResponse, parseGeminiResponse, rpcPayload } from "./gemini";
 import { getAiStudioPromptDetail, installAiStudioCapture, listAiStudioPromptInventory, listAiStudioPrompts } from "./ai-studio";
 
@@ -51,12 +51,7 @@ async function claudeList(): Promise<Record<string, unknown>[]> {
   for (const organization of organizations) {
     const organizationId = String(organization.uuid);
     const initial = `/api/organizations/${encodeURIComponent(organizationId)}/chat_conversations`;
-    const rows = await collectInventory("Claude", async (cursor) => {
-      const url = cursor ?? initial;
-      const response = await fetch(url, { credentials: "include" });
-      if (!response.ok) throw new Error(`Claude organization conversation inventory failed (${response.status})`);
-      return { items: claudeRows(await response.json(), "Claude conversation"), cursor: claudeNextLink(response.headers.get("Link"), url) };
-    }, (row) => String(row.uuid));
+    const rows = await fetchClaudeInventory(initial, "Claude conversation");
     output.push(...rows.map((row) => ({ ...row, _organization_uuid: organizationId })));
   }
   return output;
@@ -70,7 +65,7 @@ async function claudeAccount(): Promise<unknown> {
 async function claudeProjects(parameters: Record<string, unknown> | undefined): Promise<unknown> {
   requireHost("claude.ai");
   const organizationId = safeToken(parameters?.organizationId, "organization ID");
-  return await fetchJson(`/api/organizations/${encodeURIComponent(organizationId)}/projects`, "Claude project inventory");
+  return await fetchClaudeInventory(`/api/organizations/${encodeURIComponent(organizationId)}/projects`, "Claude project", fetch, true);
 }
 
 async function claudeProjectResource(parameters: Record<string, unknown> | undefined, kind: "detail" | "docs" | "conversations"): Promise<unknown> {
@@ -78,7 +73,8 @@ async function claudeProjectResource(parameters: Record<string, unknown> | undef
   const organizationId = safeToken(parameters?.organizationId, "organization ID");
   const projectId = safeToken(parameters?.projectId, "project ID");
   const suffix = kind === "detail" ? "" : kind === "docs" ? "/docs?tree=true" : "/conversations?tree=true";
-  return await fetchJson(`/api/organizations/${encodeURIComponent(organizationId)}/projects/${encodeURIComponent(projectId)}${suffix}`, `Claude project ${kind}`);
+  const url = `/api/organizations/${encodeURIComponent(organizationId)}/projects/${encodeURIComponent(projectId)}${suffix}`;
+  return kind === "detail" ? await fetchJson(url, "Claude project detail") : await fetchClaudeInventory(url, `Claude project ${kind}`, fetch, kind === "docs");
 }
 
 async function claudeFile(parameters: Record<string, unknown> | undefined): Promise<unknown> {
@@ -138,13 +134,16 @@ async function geminiGems(): Promise<unknown> {
   requireHost("gemini.google.com");
   const listText = await geminiRpc("CNgdBe", [2, ["en"], false]);
   const list = rpcPayload(listText, "CNgdBe");
-  const rows = Array.isArray(list?.[2]) ? list[2] : [];
+  if (!Array.isArray(list?.[2])) throw new Error("Gemini Gem inventory response was malformed or missing");
+  const rows = list[2];
   const records: Array<{ id: string; inventory: unknown; detail: unknown }> = [];
   for (const row of rows) {
-    if (!Array.isArray(row) || typeof row[0] !== "string" || !row[0]) continue;
+    if (!Array.isArray(row) || typeof row[0] !== "string" || !row[0]) throw new Error("Gemini Gem inventory record lacks an identity");
     const id = row[0];
     const detailText = await geminiRpc("HcT8bb", [id, ["en"], true, null, true]);
-    records.push({ id, inventory: row, detail: rpcPayload(detailText, "HcT8bb") ?? detailText });
+    const detail = rpcPayload(detailText, "HcT8bb");
+    if (!Array.isArray(detail) || !detail.length) throw new Error("Gemini Gem detail was malformed or missing");
+    records.push({ id, inventory: row, detail });
   }
   return { provider_raw: list ?? listText, gems: records };
 }
