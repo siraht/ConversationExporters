@@ -70,6 +70,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
   if (value.type === "GROK_EXPORTER_FIND_TAB") { void findProviderTab(["https://grok.com/*"], "Open and sign in to Grok, then retry.").then(sendResponse); return true; }
   if (value.type === "GROK_EXPORTER_API_REQUEST") { void grokRequest(value as unknown as RuntimeApiRequest).then(sendResponse); return true; }
   if (value.type === "UNIFIED_SYNC_PROVIDER") { respond(runExclusive(() => syncProvider(value.provider as SyncProvider)), sendResponse); return true; }
+  if (value.type === "UNIFIED_SYNC_ALL") { respond(runExclusive(syncAll), sendResponse); return true; }
   if (value.type === "UNIFIED_CANCEL_SYNC") { cancelled = true; cancelActive?.(); sendResponse({ ok: true }); return false; }
   if (value.type === "UNIFIED_GET_SETTINGS") { respond(publicSettings(), sendResponse, "settings"); return true; }
   if (value.type === "UNIFIED_SAVE_SETTINGS") { respond(saveSettings(value.settings), sendResponse); return true; }
@@ -376,6 +377,7 @@ async function syncGemini(filesystem: ArchiveFileSystem): Promise<SyncSummary> {
       const detail = asRecord(await pageRequest("https://gemini.google.com/*", "geminiDetail", { conversationId: id }));
       if (!Array.isArray(detail.messages) || !detail.messages.length) throw new Error("Gemini rendered no messages for a listed conversation");
       const record = { ...row, ...detail };
+      await preserveTruncatedAttempt(filesystem, root, record);
       await writeJson(filesystem, `${root}/metadata.json`, row);
       await writeJson(filesystem, `${root}/conversation.json`, record);
       const assets = providerAssetUrls(detail);
@@ -514,6 +516,11 @@ export async function runExclusive<T>(operation: () => Promise<T>): Promise<T> {
   active = promise;
   try { return await promise; }
   finally { clearInterval(heartbeat); active = undefined; }
+}
+export async function preserveTruncatedAttempt(filesystem: ArchiveFileSystem, root: string, record: JsonRecord): Promise<void> {
+  if (record.possibly_truncated !== true) return;
+  await writeJson(filesystem, `${root}/truncated-attempt.json`, record);
+  throw new Error("Gemini detail reached the provider turn limit. Partial response retained separately; any previous conversation is preserved.");
 }
 function messageOf(error: unknown): string { return error instanceof Error ? error.message : "Operation failed"; }
 

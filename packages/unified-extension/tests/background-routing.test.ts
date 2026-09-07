@@ -46,6 +46,13 @@ function dispatch(provider: string): Promise<unknown> {
 }
 
 describe("background provider routing", () => {
+  it("owns the entire manual all-provider run without dashboard orchestration", async () => {
+    const response = await new Promise((resolve) => listener({ type: "UNIFIED_SYNC_ALL" }, { id: "test", url: "moz-extension://test/dashboard.html" }, resolve));
+    expect(response).toMatchObject({ ok: true, result: {
+      claude: { failed: 0 }, gemini: { failed: 0 }, "ai-studio": { failed: 0 }, chatgpt: { failed: 0 }, grok: { failed: 0 },
+    } });
+    expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+  });
   it("runs ChatGPT and Grok manually through injected page transports", async () => {
     for (const provider of ["chatgpt", "grok"]) {
       expect(await dispatch(provider)).toMatchObject({ ok: true, result: { provider, failed: 0 } });

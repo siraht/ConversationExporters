@@ -95,7 +95,17 @@ async function syncAll(): Promise<void> {
   if (syncRunning) return;
   syncRunning = true; setProviderControlsBusy(true);
   try {
-    for (const provider of ["chatgpt", "grok", "claude", "gemini", "ai-studio"] as const) await performProviderSync(provider);
+    await ensureProviderPermissions("ai-studio");
+    setCancellation(() => { void chrome.runtime.sendMessage({ type: "UNIFIED_CANCEL_SYNC" }); });
+    setStatus("Syncing all providers in the background…", "busy");
+    const response = await chrome.runtime.sendMessage({ type: "UNIFIED_SYNC_ALL" }) as { ok: boolean; result?: Record<string, SyncSummary | { error: string }>; error?: string };
+    if (!response.ok || !response.result) throw new Error(response.error ?? "Sync failed");
+    const failures = Object.entries(response.result).filter(([, result]) => "error" in result || result.failed > 0);
+    const finished = Object.keys(response.result).length;
+    setStatus(`Background run finished: ${finished}/5 providers attempted, ${failures.length} with failures.${failures.length ? " " + failures.map(([provider, result]) => `${provider}: ${"error" in result ? result.error : `${result.failed} failed`}`).join("; ") : ""}`, failures.length || finished < 5 ? "error" : "complete");
+    await refreshArchive();
+  } catch (error) {
+    setStatus(messageOf(error), "error");
   } finally { syncRunning = false; setProviderControlsBusy(false); setCancellation(null); }
 }
 

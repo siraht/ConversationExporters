@@ -13,6 +13,13 @@ beforeAll(async () => {
 });
 
 describe("archive completeness reconciliation", () => {
+  it("retains truncated refresh payloads without overwriting the prior conversation", async () => {
+    const fs = new MemoryArchiveFileSystem();
+    await fs.writeTextAtomic("conversations/chat/conversation.json", "previous full record");
+    await expect(background.preserveTruncatedAttempt(fs, "conversations/chat", { possibly_truncated: true, messages: [] })).rejects.toThrow("turn limit");
+    expect(await fs.readText("conversations/chat/conversation.json")).toBe("previous full record");
+    expect(JSON.parse((await fs.readText("conversations/chat/truncated-attempt.json"))!)).toMatchObject({ possibly_truncated: true });
+  });
   it("rejects equal counts belonging to different IDs", async () => {
     const fs = new MemoryArchiveFileSystem();
     await fs.writeTextAtomic("conversations/old/complete.json", "{}");
