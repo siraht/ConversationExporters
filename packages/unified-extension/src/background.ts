@@ -19,7 +19,20 @@ let active: Promise<unknown> | undefined;
 
 chrome.action.onClicked.addListener(() => { void chrome.tabs.create({ url: chrome.runtime.getURL("dashboard.html") }); });
 chrome.runtime.onInstalled.addListener(() => { void chrome.alarms.create("conversation-exporter-sync", { periodInMinutes: 60 }); });
-chrome.alarms.onAlarm.addListener((alarm) => { if (alarm.name === "conversation-exporter-sync") void runExclusive(syncAll).catch(() => undefined); });
+chrome.alarms.onAlarm.addListener((alarm) => { if (alarm.name === "conversation-exporter-sync") void runScheduledSync(); });
+
+async function runScheduledSync(): Promise<void> {
+  const startedAt = new Date().toISOString();
+  const key = "conversationExporters.scheduledSync";
+  try {
+    await chrome.storage.local.set({ [key]: { status: "running", startedAt, providers: ["claude", "gemini", "ai-studio"] } });
+    const results = await runExclusive(syncAll);
+    const partial = Object.values(results).some((result) => "error" in result || result.failed > 0);
+    await chrome.storage.local.set({ [key]: { status: partial ? "partial" : "complete", startedAt, completedAt: new Date().toISOString(), results } });
+  } catch (error) {
+    await chrome.storage.local.set({ [key]: { status: "failed", startedAt, completedAt: new Date().toISOString(), error: messageOf(error) } });
+  }
+}
 
 chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
   if (!isTrustedExtensionSender(sender)) return false;
@@ -144,11 +157,19 @@ async function syncProvider(provider: DirectProvider): Promise<SyncSummary> {
   const namespace: NativeArchiveNamespace = provider === "claude" ? "claude-web" : provider === "gemini" ? "gemini-web" : "google-ai-studio";
   const filesystem = new IndexedDbArchiveFileSystem(namespace);
   try {
+    await writeJson(filesystem, "sync-report.json", { schemaVersion: 1, provider, status: "running", startedAt: new Date().toISOString() });
+    await writeJson(filesystem, "validation.json", { schemaVersion: 2, provider, valid: false, status: "running", checkedAt: new Date().toISOString() });
     const summary = provider === "claude" ? await syncClaude(filesystem) : provider === "gemini" ? await syncGemini(filesystem) : await syncAiStudio(filesystem);
     await filesystem.writeTextAtomic("sync-report.json", JSON.stringify({ schemaVersion: 1, provider, status: summary.failed ? "partial" : "complete", completedAt: new Date().toISOString(), summary }));
-    await syncArchive(namespace).catch(() => undefined);
+    try {
+      const replication = await syncArchive(namespace);
+      await writeJson(filesystem, "replication-report.json", { ...replication, status: replication.failed ? "partial" : "complete", checkedAt: new Date().toISOString() });
+    } catch (error) {
+      await writeJson(filesystem, "replication-report.json", { status: "failed", error: messageOf(error), checkedAt: new Date().toISOString() });
+    }
     return summary;
   } catch (error) {
+    await writeJson(filesystem, "validation.json", { schemaVersion: 2, provider, valid: false, status: "failed", error: messageOf(error), checkedAt: new Date().toISOString() });
     await filesystem.writeTextAtomic("sync-report.json", JSON.stringify({ schemaVersion: 1, provider, status: "failed", completedAt: new Date().toISOString(), error: messageOf(error) })).catch(() => undefined);
     throw error;
   }
@@ -162,7 +183,7 @@ async function syncClaude(filesystem: ArchiveFileSystem): Promise<SyncSummary> {
   let fetched = 0, unchanged = 0, failed = 0;
 
   for (const organization of organizations) {
-    const organizationId = text(organization.uuid); if (!organizationId) continue;
+    const organizationId = text(organization.uuid); if (!organizationId) throw new Error("Claude organization inventory contains an entry without an ID");
     const orgRoot = `organizations/${pathSegment(organizationId)}`;
     await writeJson(filesystem, `${orgRoot}/organization.json`, organization);
     if (Array.isArray(organization.capabilities) && !organization.capabilities.includes("chat")) {
@@ -173,7 +194,7 @@ async function syncClaude(filesystem: ArchiveFileSystem): Promise<SyncSummary> {
       const projects = asRecords(await pageRequest("https://claude.ai/*", "claudeProjects", { organizationId }));
       await writeJson(filesystem, `${orgRoot}/projects/index.json`, projects);
       for (const project of projects) {
-        const projectId = text(project.uuid) ?? text(project.id); if (!projectId) continue;
+        const projectId = text(project.uuid) ?? text(project.id); if (!projectId) throw new Error("Claude project inventory contains an entry without an ID");
         const projectRoot = `${orgRoot}/projects/${pathSegment(projectId)}`;
         try {
           const [detail, docs, conversations] = await Promise.all([
@@ -184,6 +205,11 @@ async function syncClaude(filesystem: ArchiveFileSystem): Promise<SyncSummary> {
           await writeJson(filesystem, `${projectRoot}/project.json`, detail);
           await writeJson(filesystem, `${projectRoot}/docs.json`, docs);
           await writeJson(filesystem, `${projectRoot}/conversations.json`, conversations);
+          for (const conversation of asRecords(conversations)) {
+            const conversationId = text(conversation.uuid);
+            if (!conversationId) throw new Error("Claude project conversation has no ID");
+            if (!listing.some((row) => row.uuid === conversationId)) listing.push({ ...conversation, _organization_uuid: organizationId });
+          }
           const instructions = text(asRecordOrEmpty(detail).prompt_template);
           if (instructions) await filesystem.writeTextAtomic(`${projectRoot}/instructions.md`, instructions);
           for (const [index, doc] of asRecordsOrEmpty(docs).entries()) {
@@ -204,10 +230,10 @@ async function syncClaude(filesystem: ArchiveFileSystem): Promise<SyncSummary> {
   }
 
   for (const row of listing) {
-    const id = text(row.uuid), organizationId = text(row._organization_uuid); if (!id || !organizationId) continue;
+    const id = text(row.uuid), organizationId = text(row._organization_uuid); if (!id || !organizationId) { failed += 1; continue; }
     const root = `conversations/${pathSegment(id)}`;
     const prior = await readJson<JsonRecord>(filesystem, `${root}/metadata.json`, {});
-    if (prior.updated_at === row.updated_at && await filesystem.exists(`${root}/complete.json`)) { unchanged += 1; continue; }
+    if (hasMatchingTimestamp(prior.updated_at, row.updated_at) && await filesystem.exists(`${root}/complete.json`) && !await filesystem.exists(`${root}/error.json`)) { unchanged += 1; continue; }
     try {
       const detail = { ...asRecord(await pageRequest("https://claude.ai/*", "claudeDetail", { organizationId, conversationId: id })), _organization_uuid: organizationId };
       await writeJson(filesystem, `${root}/metadata.json`, row);
@@ -238,14 +264,14 @@ async function syncClaude(filesystem: ArchiveFileSystem): Promise<SyncSummary> {
     }
     await delay(150);
   }
-  if (await writeValidation(filesystem, "claude", listing.length, /^conversations\/[^/]+\/complete\.json$/)) {
-    await removeIfExists(filesystem, "conversations.json");
-  }
+  await writeJson(filesystem, "inventory.json", { schema: "conversation-exporters/claude-web/3", organizations, conversations: listing });
+  if (!await writeValidation(filesystem, "claude", listing.map((row) => text(row.uuid)), "conversations", failed)) failed = Math.max(failed, 1);
   return { provider: "claude", discovered: listing.length, fetched, unchanged, retained: 0, failed };
 }
 
 async function syncGemini(filesystem: ArchiveFileSystem): Promise<SyncSummary> {
   const liveListing = asRecords(await pageRequest("https://gemini.google.com/*", "geminiList"));
+  if (liveListing.some((row) => !text(row.id))) throw new Error("Gemini inventory contains an entry without an ID");
   const priorInventory = asRecordsOrEmpty((await readJson<JsonRecord>(filesystem, "inventory.json", {})).conversations);
   const legacy = await readJson<unknown>(filesystem, "conversations.json", {});
   const legacyListing = asRecordsOrEmpty(asRecordOrEmpty(legacy).conversations);
@@ -281,7 +307,7 @@ async function syncGemini(filesystem: ArchiveFileSystem): Promise<SyncSummary> {
     const id = text(row.id); if (!id) return;
     const root = `conversations/${pathSegment(id)}`;
     const prior = await readJson<JsonRecord>(filesystem, `${root}/metadata.json`, {});
-    if (prior.updated_at === row.updated_at && await filesystem.exists(`${root}/complete.json`)) { unchanged += 1; return; }
+    if (hasMatchingTimestamp(prior.updated_at, row.updated_at) && await filesystem.exists(`${root}/complete.json`) && !await filesystem.exists(`${root}/error.json`)) { unchanged += 1; return; }
     try {
       const detail = asRecord(await pageRequest("https://gemini.google.com/*", "geminiDetail", { conversationId: id }));
       if (!Array.isArray(detail.messages) || !detail.messages.length) throw new Error("Gemini rendered no messages for a listed conversation");
@@ -303,9 +329,7 @@ async function syncGemini(filesystem: ArchiveFileSystem): Promise<SyncSummary> {
     }
     await delay(250);
   });
-  if (await writeValidation(filesystem, "gemini", listing.length, /^conversations\/[^/]+\/complete\.json$/)) {
-    await removeIfExists(filesystem, "conversations.json");
-  }
+  if (!await writeValidation(filesystem, "gemini", listing.map((row) => text(row.id)), "conversations", failed)) failed = Math.max(failed, 1);
   return { provider: "gemini", discovered: listing.length, fetched, unchanged, retained: 0, failed };
 }
 
@@ -350,9 +374,7 @@ async function syncAiStudio(filesystem: ArchiveFileSystem): Promise<SyncSummary>
       await writeJson(filesystem, `${root}/error.json`, { error: messageOf(error), failedAt: new Date().toISOString() });
     }
   }
-  if (await writeValidation(filesystem, "ai-studio", prompts.length, /^prompts\/[^/]+\/complete\.json$/)) {
-    await removeIfExists(filesystem, "prompts.json");
-  }
+  if (!await writeValidation(filesystem, "ai-studio", prompts.map((row) => row.id), "prompts", failed)) failed = Math.max(failed, 1);
   return { provider: "ai-studio", discovered: prompts.length, fetched, unchanged, retained: 0, failed };
 }
 
@@ -476,12 +498,23 @@ async function downloadProviderAssets(filesystem: ArchiveFileSystem, root: strin
   return output;
 }
 
-async function writeValidation(filesystem: ArchiveFileSystem, provider: DirectProvider, discovered: number, completePattern: RegExp): Promise<boolean> {
-  const paths = await filesystem.listPaths();
-  const complete = paths.filter((path) => completePattern.test(path)).length;
-  const incomplete = paths.filter((path) => /\/(?:incomplete|error)\.json$/.test(path)).length;
-  const valid = complete === discovered && incomplete === 0;
-  await writeJson(filesystem, "validation.json", { schemaVersion: 1, provider, discovered, complete, incomplete, valid, checkedAt: new Date().toISOString() });
+export function hasMatchingTimestamp(previous: unknown, incoming: unknown): boolean {
+  const usable = (value: unknown): boolean => typeof value === "number" ? Number.isFinite(value) && value > 0 : typeof value === "string" && value.trim().length > 0 && Number.isFinite(Date.parse(value));
+  return usable(previous) && usable(incoming) && previous === incoming;
+}
+
+export async function writeValidation(filesystem: ArchiveFileSystem, provider: DirectProvider, ids: Array<string | undefined>, directory: string, failures = 0): Promise<boolean> {
+  const paths = new Set(await filesystem.listPaths());
+  const expected = new Set(ids.filter((id): id is string => Boolean(id)));
+  const missingIds = [...expected].filter((id) => !paths.has(`${directory}/${pathSegment(id)}/complete.json`));
+  const failedIds = [...expected].filter((id) => ["incomplete", "error"].some((marker) => paths.has(`${directory}/${pathSegment(id)}/${marker}.json`)));
+  const expectedPaths = new Set([...expected].map((id) => `${directory}/${pathSegment(id)}/complete.json`));
+  const invalidIds = ids.length - expected.size + expected.size - expectedPaths.size;
+  const retained = [...paths].filter((path) => path.startsWith(`${directory}/`) && path.endsWith("/complete.json") && !expectedPaths.has(path)).length;
+  const complete = expected.size - new Set([...missingIds, ...failedIds]).size;
+  const incomplete = expected.size - complete;
+  const valid = missingIds.length === 0 && failedIds.length === 0 && invalidIds === 0 && failures === 0;
+  await writeJson(filesystem, "validation.json", { schemaVersion: 2, provider, scope: "discovered-inventory", discovered: expected.size, complete, incomplete, retained, missingIds, failedIds, invalidIds, failures, valid, checkedAt: new Date().toISOString() });
   return valid;
 }
 
