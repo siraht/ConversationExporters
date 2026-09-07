@@ -1,7 +1,6 @@
 import { listBrowserArchiveEntries } from "@conversation-exporters/shared/indexeddb-filesystem";
 import { zipSync } from "fflate";
 import { summarizeBrowserArchives, type ArchiveSummary } from "./archive-summary";
-import { syncManagedChatGpt, syncManagedGrok } from "./managed-sync";
 import type { ArchiveNamespace, DirectProvider, SyncProvider, SyncSummary } from "./types";
 
 const status = required<HTMLElement>("status");
@@ -48,9 +47,8 @@ async function performProviderSync(provider: SyncProvider): Promise<void> {
   try {
     await ensureProviderPermissions(provider);
     let result: SyncSummary;
-    if (provider === "chatgpt") result = await syncManagedChatGpt((message) => setStatus(message, "busy"), setCancellation);
-    else if (provider === "grok") result = await syncManagedGrok((message) => setStatus(message, "busy"), setCancellation);
-    else {
+    {
+      setCancellation(() => { void chrome.runtime.sendMessage({ type: "UNIFIED_CANCEL_SYNC" }); });
       const response = await chrome.runtime.sendMessage({ type: "UNIFIED_SYNC_PROVIDER", provider }) as { ok: boolean; result?: SyncSummary; error?: string };
       if (!response.ok || !response.result) throw new Error(response.error ?? "Sync failed");
       result = response.result;
@@ -149,7 +147,31 @@ async function exportArchive(): Promise<void> {
   finally { setBusy(button, false); }
 }
 
-async function refresh(): Promise<void> { await refreshArchive(); }
+async function refresh(): Promise<void> { await refreshArchive(); await refreshSchedule(); await refreshActiveSync(); }
+async function refreshActiveSync(): Promise<void> {
+  const key = "conversationExporters.activeSync";
+  const value = (await chrome.storage.local.get(key))[key] as { provider?: string; status?: string; message?: string; error?: string } | undefined;
+  if (!value) return;
+  const running = value.status === "running";
+  syncRunning = running;
+  setProviderControlsBusy(running);
+  setCancellation(running ? () => { void chrome.runtime.sendMessage({ type: "UNIFIED_CANCEL_SYNC" }); } : null);
+  setStatus(value.error ?? value.message ?? `${value.provider ?? "Provider"}: ${value.status ?? "unknown"}`, running ? "busy" : value.status === "complete" ? "complete" : "error");
+  if (!running) await refreshArchive();
+}
+async function refreshSchedule(): Promise<void> {
+  const key = "conversationExporters.scheduledSync";
+  const value = (await chrome.storage.local.get(key))[key] as { status?: string; startedAt?: string; completedAt?: string; error?: string; results?: Record<string, { error?: string; failed?: number }> } | undefined;
+  const element = document.getElementById("scheduled-status");
+  if (!element) return;
+  if (!value) { element.textContent = "No automatic run recorded. Hourly background sync covers all five providers when signed-in tabs are available."; return; }
+  const failures = Object.entries(value.results ?? {}).filter(([, result]) => result.error || result.failed).map(([provider, result]) => `${provider}: ${result.error ?? `${result.failed} failures`}`);
+  element.textContent = `Automatic sync (all five providers): ${value.status ?? "unknown"} · ${value.completedAt ?? value.startedAt ?? "time unavailable"}. ${value.error ?? failures.join("; ")}`;
+}
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes["conversationExporters.scheduledSync"]) void refreshSchedule();
+  if (area === "local" && changes["conversationExporters.activeSync"]) void refreshActiveSync();
+});
 async function refreshArchive(): Promise<void> {
   const results = await summarizeBrowserArchives(await listBrowserArchiveEntries());
   const byNamespace = new Map(results.map((item) => [item.namespace, item]));
@@ -184,8 +206,8 @@ function setStatus(message: string, state: string): void {
 function messageOf(error: unknown): string { return error instanceof Error ? error.message : "Operation failed"; }
 function label(provider: SyncProvider): string { return provider === "ai-studio" ? "AI Studio" : provider === "chatgpt" ? "ChatGPT" : provider[0]!.toUpperCase() + provider.slice(1); }
 function recordSummary(summary: ArchiveSummary): string {
-  const records = countLabel(summary.captured, summary.recordKind);
-  return summary.discovered !== undefined && summary.discovered > summary.captured ? `${summary.captured} / ${summary.discovered} ${plural(summary.recordKind, summary.discovered)}` : records;
+  const records = `${countLabel(summary.captured, summary.recordKind)} stored`;
+  return summary.discovered !== undefined ? `${records} · ${summary.discovered} inventoried` : records;
 }
 function archiveDetails(summary: ArchiveSummary): string {
   const details = summary.namespace === "chatgpt-web" || summary.namespace === "claude-web"
@@ -195,7 +217,7 @@ function archiveDetails(summary: ArchiveSummary): string {
       : summary.namespace === "google-ai-studio"
         ? [countLabel(summary.assets ?? 0, "asset")]
         : [countLabel(summary.files, "archive file")];
-  return [...details, formatBytes(summary.bytes)].join(" · ");
+  return [...details, formatBytes(summary.bytes), summary.syncStatus ? `Last run: ${summary.syncStatus}` : "Freshness unverified", ...(summary.lastSyncAt ? [summary.lastSyncAt] : [])].join(" · ");
 }
 function countLabel(count: number, singular: string): string { return `${count} ${plural(singular, count)}`; }
 function plural(singular: string, count: number): string { return count === 1 ? singular : `${singular}s`; }

@@ -7,6 +7,13 @@ function entry(namespace: string, path: string, value: unknown = "x"): BrowserAr
 }
 
 describe("browser archive summaries", () => {
+  it("keeps failed sync freshness visible despite retained complete records", async () => {
+    const [summary] = await summarizeBrowserArchives([
+      entry("grok-web", "conversations/old/complete.json"),
+      entry("grok-web", "sync-report.json", { status: "failed", completedAt: "2026-09-07T12:00:00Z" }),
+    ]);
+    expect(summary).toMatchObject({ captured: 1, syncStatus: "failed", lastSyncAt: "2026-09-07T12:00:00Z" });
+  });
   it("distinguishes captured ChatGPT chats from inventory totals", async () => {
     const [summary] = await summarizeBrowserArchives([
       entry("chatgpt-web", "ChatGPTExport-personal/inventory.json", { conversations: [{}, {}, {}], projects: [{}, {}] }),

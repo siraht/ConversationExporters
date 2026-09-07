@@ -11,6 +11,8 @@ export interface ArchiveSummary {
   workspaces?: number;
   projects?: number;
   assets?: number;
+  lastSyncAt?: string;
+  syncStatus?: string;
 }
 
 export async function summarizeBrowserArchives(entries: BrowserArchiveEntry[]): Promise<ArchiveSummary[]> {
@@ -25,7 +27,11 @@ export async function summarizeBrowserArchives(entries: BrowserArchiveEntry[]): 
 }
 
 async function summarizeArchive(namespace: ArchiveNamespace, entries: BrowserArchiveEntry[]): Promise<ArchiveSummary> {
-  const base = { namespace, files: entries.length, bytes: entries.reduce((sum, entry) => sum + entry.blob.size, 0) };
+  const report = objectValue(await readObject(entries.find((entry) => entry.path === "sync-report.json")));
+  const base = { namespace, files: entries.length, bytes: entries.reduce((sum, entry) => sum + entry.blob.size, 0),
+    ...(typeof report?.completedAt === "string" ? { lastSyncAt: report.completedAt } : {}),
+    ...(typeof report?.status === "string" ? { syncStatus: report.status } : {}),
+  };
   if (namespace === "chatgpt-web") {
     const captured = matchingPaths(entries, /^ChatGPTExport-[^/]+\/conversations\/[^/]+\/complete\.json$/);
     const workspaces = new Set(entries.flatMap((entry) => entry.path.match(/^(ChatGPTExport-[^/]+)\//)?.[1] ?? [])).size;
@@ -49,7 +55,6 @@ async function summarizeArchive(namespace: ArchiveNamespace, entries: BrowserArc
       assets: matchingPaths(entries, /^conversations\/[^/]+\/assets\/[^/]+$/),
     };
   }
-  const report = objectValue(await readObject(entries.find((entry) => entry.path === "sync-report.json")));
   const result = objectValue(report?.summary);
   const capturedFromReport = numeric(result?.fetched) + numeric(result?.unchanged) + numeric(result?.retained);
   const inventory = objectValue(await readObject(entries.find((entry) => entry.path === "inventory.json")));
