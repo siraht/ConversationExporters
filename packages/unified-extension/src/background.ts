@@ -21,12 +21,26 @@ let active: Promise<unknown> | undefined;
 let cancelActive: (() => void) | null = null;
 let cancelled = false;
 const ACTIVE_SYNC_KEY = "conversationExporters.activeSync";
-const initialization = recoverInterruptedSync();
+const initialization = initializeBackground();
+
+async function initializeBackground(): Promise<void> {
+  await recoverInterruptedSync();
+  if (!await chrome.alarms.get("conversation-exporter-sync")) await chrome.alarms.create("conversation-exporter-sync", { periodInMinutes: 60 });
+}
 
 export async function recoverInterruptedSync(): Promise<void> {
   for (const key of [ACTIVE_SYNC_KEY, "conversationExporters.scheduledSync"]) {
     const prior = (await chrome.storage.local.get(key))[key] as Record<string, unknown> | undefined;
-    if (prior?.status === "running") await chrome.storage.local.set({ [key]: { ...prior, status: "interrupted", completedAt: new Date().toISOString(), error: "The extension background stopped before this run finished. Sync again to resume from saved records." } });
+    if (prior?.status === "running") {
+      const interrupted = { ...prior, status: "interrupted", completedAt: new Date().toISOString(), error: "The extension background stopped before this run finished. Sync again to resume from saved records." };
+      await chrome.storage.local.set({ [key]: interrupted });
+      if (key === ACTIVE_SYNC_KEY && ["claude", "gemini", "ai-studio", "chatgpt", "grok"].includes(String(prior.provider))) {
+        const namespace = prior.provider === "ai-studio" ? "google-ai-studio" : `${prior.provider}-web` as NativeArchiveNamespace;
+        const filesystem = new IndexedDbArchiveFileSystem(namespace);
+        await writeJson(filesystem, "sync-report.json", { schemaVersion: 1, ...interrupted });
+        await writeJson(filesystem, "validation.json", { schemaVersion: 2, valid: false, status: "interrupted", checkedAt: interrupted.completedAt });
+      }
+    }
   }
 }
 
@@ -34,7 +48,7 @@ chrome.action.onClicked.addListener(() => { void chrome.tabs.create({ url: chrom
 chrome.runtime.onInstalled.addListener(() => { void chrome.alarms.create("conversation-exporter-sync", { periodInMinutes: 60 }); });
 chrome.alarms.onAlarm.addListener((alarm) => { if (alarm.name === "conversation-exporter-sync") void runScheduledSync(); });
 
-async function runScheduledSync(): Promise<void> {
+export async function runScheduledSync(): Promise<void> {
   const startedAt = new Date().toISOString();
   const key = "conversationExporters.scheduledSync";
   try {
@@ -282,7 +296,7 @@ async function syncClaude(filesystem: ArchiveFileSystem): Promise<SyncSummary> {
     const id = text(row.uuid), organizationId = text(row._organization_uuid); if (!id || !organizationId) { failed += 1; continue; }
     const root = `conversations/${pathSegment(id)}`;
     const prior = await readJson<JsonRecord>(filesystem, `${root}/metadata.json`, {});
-    if (hasMatchingTimestamp(prior.updated_at, row.updated_at) && await filesystem.exists(`${root}/complete.json`) && !await filesystem.exists(`${root}/error.json`)) { unchanged += 1; continue; }
+    if (await canSkipCapture(filesystem, root, prior.updated_at, row.updated_at)) { unchanged += 1; continue; }
     try {
       const detail = { ...asRecord(await pageRequest("https://claude.ai/*", "claudeDetail", { organizationId, conversationId: id })), _organization_uuid: organizationId };
       await writeJson(filesystem, `${root}/metadata.json`, row);
@@ -293,7 +307,7 @@ async function syncClaude(filesystem: ArchiveFileSystem): Promise<SyncSummary> {
         try {
           const path = `${root}/assets/${String(index + 1).padStart(4, "0")}-${pathSegment(file.name)}`;
           const response = await storeProviderAsset(filesystem, path, "https://claude.ai/*", "claudeFile", { organizationId, conversationId: id, ...(file.fileUuid ? { fileUuid: file.fileUuid, previewUrl: file.previewUrl } : { sandboxPath: file.sandboxPath }) });
-          assetManifest.push({ ...file, path, bytes: response.size, contentType: response.contentType, sourceVariant: response.variant, hash: response.hash });
+          assetManifest.push({ ...file, path, bytes: response.size, contentType: response.contentType, sourceVariant: response.variant, hash: response.hash, ...(response.variant === "preview" ? { error: "Original asset unavailable; a preview was retained. Sync again to retry the original." } : {}) });
         } catch (error) {
           assetManifest.push({ ...file, error: messageOf(error) });
         }
@@ -302,7 +316,7 @@ async function syncClaude(filesystem: ArchiveFileSystem): Promise<SyncSummary> {
       const sourceHash = await sha256Hex(JSON.stringify(detail));
       const assetFailures = assetManifest.filter((item) => item.error).length;
       const marker = assetFailures ? "incomplete" : "complete";
-      await writeJson(filesystem, `${root}/${marker}.json`, { schemaVersion: 1, sourceHash, assets: assetManifest.length, failedAssets: assetFailures, completedAt: new Date().toISOString() });
+      await writeJson(filesystem, `${root}/${marker}.json`, { schemaVersion: 1, captureVersion: 2, sourceHash, assets: assetManifest.length, failedAssets: assetFailures, completedAt: new Date().toISOString() });
       await removeIfExists(filesystem, `${root}/${assetFailures ? "complete" : "incomplete"}.json`);
       await removeIfExists(filesystem, `${root}/error.json`);
       if (assetFailures) failed += 1;
@@ -357,7 +371,7 @@ async function syncGemini(filesystem: ArchiveFileSystem): Promise<SyncSummary> {
     const id = text(row.id); if (!id) return;
     const root = `conversations/${pathSegment(id)}`;
     const prior = await readJson<JsonRecord>(filesystem, `${root}/metadata.json`, {});
-    if (hasMatchingTimestamp(prior.updated_at, row.updated_at) && await filesystem.exists(`${root}/complete.json`) && !await filesystem.exists(`${root}/error.json`)) { unchanged += 1; return; }
+    if (await canSkipCapture(filesystem, root, prior.updated_at, row.updated_at)) { unchanged += 1; return; }
     try {
       const detail = asRecord(await pageRequest("https://gemini.google.com/*", "geminiDetail", { conversationId: id }));
       if (!Array.isArray(detail.messages) || !detail.messages.length) throw new Error("Gemini rendered no messages for a listed conversation");
@@ -368,7 +382,7 @@ async function syncGemini(filesystem: ArchiveFileSystem): Promise<SyncSummary> {
       const assetManifest = await downloadProviderAssets(filesystem, root, assets, "https://gemini.google.com/*", "geminiAsset");
       await writeJson(filesystem, `${root}/assets.json`, assetManifest);
       const incomplete = detail.possibly_truncated === true || assetManifest.some((asset) => asset.error);
-      await writeJson(filesystem, `${root}/${incomplete ? "incomplete" : "complete"}.json`, { schemaVersion: 1, sourceHash: await sha256Hex(JSON.stringify(detail)), assets: assetManifest.length, failedAssets: assetManifest.filter((asset) => asset.error).length, possiblyTruncated: detail.possibly_truncated === true, completedAt: new Date().toISOString() });
+      await writeJson(filesystem, `${root}/${incomplete ? "incomplete" : "complete"}.json`, { schemaVersion: 1, captureVersion: 2, sourceHash: await sha256Hex(JSON.stringify(detail)), assets: assetManifest.length, failedAssets: assetManifest.filter((asset) => asset.error).length, possiblyTruncated: detail.possibly_truncated === true, completedAt: new Date().toISOString() });
       await removeIfExists(filesystem, `${root}/${incomplete ? "complete" : "incomplete"}.json`);
       await removeIfExists(filesystem, `${root}/error.json`);
       if (incomplete) failed += 1;
@@ -475,15 +489,19 @@ function asRecord(value: unknown): JsonRecord { if (!value || typeof value !== "
 function asRecordOrEmpty(value: unknown): JsonRecord { return value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : {}; }
 function text(value: unknown): string | undefined { return typeof value === "string" && value ? value : undefined; }
 function delay(ms: number) { return new Promise((resolve) => setTimeout(resolve, ms)); }
-async function forEachConcurrent<T>(items: readonly T[], limit: number, operation: (item: T) => Promise<void>): Promise<void> {
+export async function forEachConcurrent<T>(items: readonly T[], limit: number, operation: (item: T) => Promise<void>): Promise<void> {
   let cursor = 0;
+  let stopped = false;
   async function worker(): Promise<void> {
-    while (cursor < items.length) {
+    while (!stopped && cursor < items.length) {
       const item = items[cursor++];
-      if (item !== undefined) await operation(item);
+      try { if (item !== undefined) await operation(item); }
+      catch (error) { stopped = true; throw error; }
     }
   }
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => worker()));
+  const results = await Promise.allSettled(Array.from({ length: Math.min(limit, items.length) }, () => worker()));
+  const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+  if (failure) throw failure.reason;
 }
 export async function runExclusive<T>(operation: () => Promise<T>): Promise<T> {
   await initialization;
@@ -564,6 +582,12 @@ async function downloadProviderAssets(filesystem: ArchiveFileSystem, root: strin
 export function hasMatchingTimestamp(previous: unknown, incoming: unknown): boolean {
   const usable = (value: unknown): boolean => typeof value === "number" ? Number.isFinite(value) && value > 0 : typeof value === "string" && value.trim().length > 0 && Number.isFinite(Date.parse(value));
   return usable(previous) && usable(incoming) && previous === incoming;
+}
+
+export async function canSkipCapture(filesystem: ArchiveFileSystem, root: string, previous: unknown, incoming: unknown): Promise<boolean> {
+  if (!hasMatchingTimestamp(previous, incoming)) return false;
+  const marker = await readJson<JsonRecord>(filesystem, `${root}/complete.json`, {});
+  return marker.captureVersion === 2 && !await filesystem.exists(`${root}/error.json`) && !await filesystem.exists(`${root}/incomplete.json`);
 }
 
 export async function writeValidation(filesystem: ArchiveFileSystem, provider: DirectProvider, ids: Array<string | undefined>, directory: string, failures = 0): Promise<boolean> {

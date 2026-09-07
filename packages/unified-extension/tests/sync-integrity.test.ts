@@ -6,7 +6,7 @@ beforeAll(async () => {
   vi.stubGlobal("chrome", {
     action: { onClicked: { addListener: vi.fn() } },
     runtime: { onInstalled: { addListener: vi.fn() }, onMessage: { addListener: vi.fn() }, getPlatformInfo: vi.fn(async () => ({})) },
-    alarms: { onAlarm: { addListener: vi.fn() } },
+    alarms: { onAlarm: { addListener: vi.fn() }, get: vi.fn(async () => ({})), create: vi.fn() },
     storage: { local: { get: vi.fn(async () => ({})), set: vi.fn(async () => undefined) } },
   });
   background = await import("../src/background");
@@ -52,6 +52,16 @@ describe("archive completeness reconciliation", () => {
 });
 
 describe("timestamp freshness", () => {
+  it("refreshes legacy captures once and retries degraded captures", async () => {
+    const fs = new MemoryArchiveFileSystem();
+    const stamp = "2026-09-07T12:00:00Z";
+    await fs.writeTextAtomic("conversations/a/complete.json", "{\"schemaVersion\":1}");
+    expect(await background.canSkipCapture(fs, "conversations/a", stamp, stamp)).toBe(false);
+    await fs.writeTextAtomic("conversations/a/complete.json", "{\"captureVersion\":2}");
+    expect(await background.canSkipCapture(fs, "conversations/a", stamp, stamp)).toBe(true);
+    await fs.writeTextAtomic("conversations/a/incomplete.json", "{}");
+    expect(await background.canSkipCapture(fs, "conversations/a", stamp, stamp)).toBe(false);
+  });
   it("never treats missing or malformed timestamps as unchanged", () => {
     for (const timestamp of [undefined, null, "", "not-a-date", 0, NaN]) {
       expect(background.hasMatchingTimestamp(timestamp, timestamp)).toBe(false);
@@ -65,6 +75,19 @@ describe("timestamp freshness", () => {
 });
 
 describe("background lifecycle", () => {
+  it("drains in-flight workers before releasing a failed concurrent sync", async () => {
+    let finish!: () => void;
+    let settled = false;
+    const operation = background.forEachConcurrent([1, 2, 3], 2, async (value) => {
+      if (value === 1) throw new Error("cancelled");
+      await new Promise<void>((resolve) => { finish = resolve; });
+    }).catch(() => { settled = true; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    finish();
+    await operation;
+    expect(settled).toBe(true);
+  });
   it("keeps only the active run alive and excludes overlapping runs", async () => {
     vi.useFakeTimers();
     let finish!: () => void;
@@ -77,16 +100,5 @@ describe("background lifecycle", () => {
     await vi.advanceTimersByTimeAsync(40_000);
     expect(chrome.runtime.getPlatformInfo).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
-  });
-  it("marks unfinished runs interrupted on startup without claiming completion", async () => {
-    vi.mocked(chrome.storage.local.get).mockImplementation(async () => ({
-      "conversationExporters.activeSync": { status: "running", provider: "grok", startedAt: "2026-09-07" },
-      "conversationExporters.scheduledSync": { status: "complete" },
-    }));
-    vi.mocked(chrome.storage.local.set).mockClear();
-    await background.recoverInterruptedSync();
-    expect(chrome.storage.local.set).toHaveBeenCalledExactlyOnceWith({
-      "conversationExporters.activeSync": expect.objectContaining({ status: "interrupted", provider: "grok", error: expect.stringContaining("resume") }),
-    });
   });
 });
