@@ -11,39 +11,59 @@ const ALLOWED_ASSET_HOSTS = new Set([
 ]);
 
 export class BrowserAssetFetcher implements AssetFetcher {
-  constructor(private readonly maximumBytes = 512 * 1024 * 1024) {}
+  constructor(private readonly maximumBytes = 512 * 1024 * 1024, private readonly timeoutMs = 10 * 60_000) {
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error("Asset timeout must be positive.");
+  }
 
   async fetch(value: string, cancellation?: CancellationSignal): Promise<AssetFetchResult> {
     await cancellation?.waitIfPaused?.();
     cancellation?.throwIfCancelled();
     const url = new URL(value, "https://grok.com");
     assertAllowedAssetUrl(url);
-    const response = await fetch(url, {
-      credentials: url.hostname === "grok.com" ? "include" : "omit",
-      cache: "no-store",
-      redirect: "follow",
-    });
-    if (!response.ok) {
-      throw new GrokExporterError(`Asset request failed with HTTP ${response.status}.`, {
-        code: "ASSET_HTTP_ERROR",
-        httpStatus: response.status,
-        retryable: response.status === 408 || response.status === 429 || response.status >= 500,
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(new GrokExporterError("Asset download timed out. Retry the sync to resume.", { code: "ASSET_TIMEOUT", retryable: true })), this.timeoutMs);
+    const cancelPoll = cancellation ? setInterval(() => {
+      if (cancellation.cancelled) controller.abort(new DOMException("Export cancelled by the user.", "AbortError"));
+    }, 250) : undefined;
+    try {
+      const response = await fetch(url, {
+        credentials: url.hostname === "grok.com" ? "include" : "omit",
+        cache: "no-store",
+        redirect: "follow",
+        signal: controller.signal,
       });
+      if (!response.ok) {
+        throw new GrokExporterError(`Asset request failed with HTTP ${response.status}.`, {
+          code: "ASSET_HTTP_ERROR",
+          httpStatus: response.status,
+          retryable: response.status === 408 || response.status === 429 || response.status >= 500,
+        });
+      }
+      const finalUrl = new URL(response.url || url.href);
+      assertAllowedAssetUrl(finalUrl);
+      const declaredLength = Number(response.headers.get("Content-Length"));
+      if (Number.isFinite(declaredLength) && declaredLength > this.maximumBytes) {
+        throw new GrokExporterError(`Asset exceeds the ${this.maximumBytes}-byte safety limit.`, { code: "ASSET_TOO_LARGE" });
+      }
+      const bytes = response.body
+        ? await readCappedBody(response.body, this.maximumBytes, cancellation)
+        : new Uint8Array(await response.arrayBuffer());
+      if (controller.signal.aborted) throw controller.signal.reason;
+      cancellation?.throwIfCancelled();
+      if (bytes.byteLength > this.maximumBytes) throw new GrokExporterError(`Asset exceeds the ${this.maximumBytes}-byte safety limit.`, { code: "ASSET_TOO_LARGE" });
+      return {
+        bytes,
+        finalUrl: finalUrl.href,
+        ...(response.headers.get("Content-Type") === null ? {} : { mediaType: response.headers.get("Content-Type") as string }),
+      };
+    } catch (error) {
+      if (controller.signal.aborted) throw controller.signal.reason;
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+      if (cancelPoll !== undefined) clearInterval(cancelPoll);
+      controller.abort();
     }
-    const finalUrl = new URL(response.url || url.href);
-    assertAllowedAssetUrl(finalUrl);
-    const declaredLength = Number(response.headers.get("Content-Length"));
-    if (Number.isFinite(declaredLength) && declaredLength > this.maximumBytes) {
-      throw new GrokExporterError(`Asset exceeds the ${this.maximumBytes}-byte safety limit.`, { code: "ASSET_TOO_LARGE" });
-    }
-    const bytes = response.body
-      ? await readCappedBody(response.body, this.maximumBytes, cancellation)
-      : new Uint8Array(await response.arrayBuffer());
-    return {
-      bytes,
-      finalUrl: finalUrl.href,
-      ...(response.headers.get("Content-Type") === null ? {} : { mediaType: response.headers.get("Content-Type") as string }),
-    };
   }
 }
 
