@@ -34,6 +34,16 @@ There is no date cutoff. Equal stored/inventoried counts do not establish univer
 
 IndexedDB works in both browsers with no companion application. The direct-folder buttons appear only where the browser implements the File System Access directory picker, currently Chromium. ZIP creation has a 1 GiB in-browser safety limit; use VPS or native replication for larger browser archives.
 
+## Progress, coverage, and run history
+
+The right sidebar shows all five providers independently: queued, discovery, capture, assets, validation, replication, and finished. Phase labels show observed activity; capture and asset work can overlap. Counts update as the engines report them, without inventing totals or progress percentages during discovery.
+
+Full syncs run up to three providers concurrently. Provider-specific request pacing remains in place to limit throttling and memory use. The dashboard can close while they run. Enable optional completion notifications in the sidebar; the toolbar badge also shows active providers or an attention marker.
+
+Coverage charts show monthly captured, pending, failed, and retained conversations. Click a month to filter the table, or search by title/ID and provider/status. Creation dates are preferred; fallback update dates and unknown dates are labeled. Chart values describe the stored inventory, not independently verified provider-wide coverage.
+
+Manual and scheduled provider sync runs are retained in the browser archive's `run-history` namespace, with phase timestamps, counters and failures. The history view pages through all recorded runs without a deletion cap. History begins with version 0.5.0; earlier missing history is not reconstructed. Combined archive ZIPs include the run records. Coverage metadata refreshes every ten seconds during a run and can be refreshed manually.
+
 ## Generic VPS replication
 
 The receiver is a zero-runtime-dependency Node service. It accepts authenticated `PUT` requests, verifies SHA-256 before committing, writes through a private temporary file, and atomically renames into `<root>/live/<provider>/<path>`. The API contains no Flywheel hostname, SSH destination, filesystem root, or rclone remote.
@@ -85,7 +95,7 @@ The installer supports Google Chrome, Chromium, and Brave's standard per-user na
 ## Publish to the Chrome Web Store
 
 1. Register and finish a [Chrome Web Store developer account](https://developer.chrome.com/docs/webstore/set-up-account), including email verification and two-step verification.
-2. Run the build and package commands above. Upload `packages/unified-extension/dist/releases/conversation-archive-chrome-0.4.0.zip` as a new item in the [Developer Dashboard](https://chrome.google.com/webstore/devconsole). The ZIP has `manifest.json` at its root and includes 16, 32, 48, and 128 pixel PNG icons.
+2. Run the build and package commands above. Upload `packages/unified-extension/dist/releases/conversation-archive-chrome-0.5.0.zip` as a new item in the [Developer Dashboard](https://chrome.google.com/webstore/devconsole). The ZIP has `manifest.json` at its root and includes 16, 32, 48, and 128 pixel PNG icons.
 3. Use `store-screenshot-1280x800.png`, `store-promo-440x280.png`, and the generated `icon-128.png` from `packages/unified-extension/dist/releases` for the listing. Chrome currently requires at least a 1280×800 screenshot and a 440×280 small promotional image.
 4. Set the single purpose to: “Create private, portable archives of the user's conversations from supported AI chat websites and copy them only to storage destinations the user chooses.” In the Privacy tab, disclose **personal communications** and **website content**; state that data is stored locally by default, that optional VPS transmission goes only to the exact user-supplied HTTPS origin, and that the developer receives no data.
 5. Use this README's **Privacy policy** section as the privacy-policy URL after the repository is public. For reviewer instructions, say to install the extension, sign in to any supported provider in a normal tab, refresh that tab, open the extension dashboard, and run that provider's sync. Explain that VPS and native replication are optional.
@@ -97,8 +107,8 @@ Chrome requires a new, higher manifest version for every update. Do not upload p
 
 1. Run `npx web-ext lint --source-dir packages/unified-extension/dist/firefox`; the release is expected to report zero errors, warnings, and notices.
 2. Log in to the [AMO Developer Hub](https://addons.mozilla.org/developers/), choose **Submit a New Add-on**, and choose either **On this site** for a public AMO listing or **On your own** for Mozilla signing without a listing.
-3. Upload `packages/unified-extension/dist/releases/conversation-archive-firefox-0.4.0.zip`. Manifest V3 signing uses the stable Firefox ID already in the manifest. The manifest declares no transmission by default and requests Firefox's optional personal-communications and website-content consent only when the user enables VPS replication.
-4. Because the release JavaScript is bundled from TypeScript, upload `packages/unified-extension/dist/releases/conversation-archive-source-0.4.0.zip` when AMO asks for generated-source material. A clean checkout plus `npm ci && npm run build:unified` is the reproducible build procedure; the source packager runs the privacy gate and excludes ignored build output, private exports, and browser profiles.
+3. Upload `packages/unified-extension/dist/releases/conversation-archive-firefox-0.5.0.zip`. Manifest V3 signing uses the stable Firefox ID already in the manifest. The manifest declares no transmission by default and requests Firefox's optional personal-communications and website-content consent only when the user enables VPS replication.
+4. Because the release JavaScript is bundled from TypeScript, upload `packages/unified-extension/dist/releases/conversation-archive-source-0.5.0.zip` when AMO asks for generated-source material. A clean checkout plus `npm ci && npm run build:unified` is the reproducible build procedure; the source packager runs the privacy gate and excludes ignored build output, private exports, and browser profiles.
 5. Fill in the listing, privacy-policy URL, support address, categories, and reviewer notes, then submit. Mozilla's current [submission guide](https://extensionworkshop.com/documentation/publish/submitting-an-add-on/) covers both listed and self-distributed signing. Download the signed XPI from AMO; that signed XPI, rather than the unsigned source ZIP, is the permanent Firefox/Zen install.
 
 ## Suggested store copy

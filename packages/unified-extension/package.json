@@ -1,6 +1,6 @@
 {
   "name": "conversation-exporter",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "description": "One cross-browser extension for exporting ChatGPT, Claude, Gemini, Google AI Studio, and Grok conversations.",
   "type": "module",
