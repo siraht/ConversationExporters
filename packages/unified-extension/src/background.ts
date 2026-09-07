@@ -362,9 +362,10 @@ async function syncGemini(filesystem: ArchiveFileSystem): Promise<SyncSummary> {
   const legacy = await readJson<unknown>(filesystem, "conversations.json", {});
   const legacyListing = asRecordsOrEmpty(asRecordOrEmpty(legacy).conversations);
   const listingById = new Map<string, JsonRecord>();
+  const liveIds = new Set(liveListing.map((row) => text(row.id)));
   for (const row of [...liveListing, ...priorInventory, ...legacyListing]) {
     const id = text(row.id);
-    if (id && !listingById.has(id)) listingById.set(id, { id, title: text(row.title) ?? "Untitled", updated_at: row.updated_at ?? null });
+    if (id && !listingById.has(id)) listingById.set(id, { id, title: text(row.title) ?? "Untitled", updated_at: row.updated_at ?? null, retainedFromPriorInventory: !liveIds.has(id) });
   }
   const listing = [...listingById.values()];
   updateProvider("gemini", { discovered: listing.length, message: "Inventory found; exporting account and Gems" });

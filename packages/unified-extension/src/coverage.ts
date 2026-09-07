@@ -72,7 +72,7 @@ export async function deriveCoverage(entries: BrowserArchiveEntry[]): Promise<Pr
         const root = `${prefix}${provider === "ai-studio" ? "prompts" : "conversations"}/${segment(id)}`;
         const raw = Array.isArray(row.inventory) ? row.inventory : [];
         const metadata = Array.isArray(raw[4]) ? raw[4] : [];
-        rows.set(root, { id: prefix + id, title: string(row.title) ?? string(row.name) ?? string(metadata[0]) ?? string(metadata[1]) ?? "Untitled", provider, ...dated(row), status: status(root) });
+        rows.set(root, { id: prefix + id, title: string(row.title) ?? string(row.name) ?? string(metadata[0]) ?? string(metadata[1]) ?? "Untitled", provider, ...dated(row), status: status(root, row.retainedFromPriorInventory === true) });
       }
     }
     for (const entry of group) {
