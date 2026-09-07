@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Conversation Exporters — completeness implementation</title>
+<style>body{font:16px/1.6 system-ui;max-width:1150px;margin:40px auto;padding:0 24px;background:#faf9f6;color:#202923}h1,h2{line-height:1.2}table{border-collapse:collapse;width:100%;font-size:14px}td,th{padding:12px;text-align:left;border-bottom:1px solid #cdd5cd;vertical-align:top}th{background:#e8eee7}code{overflow-wrap:anywhere} .pending{color:#905510}.done{color:#23643c}a{color:#14634c}section{margin:36px 0}</style>
+<h1>Every retrievable conversation, with honest coverage</h1>
+<p>Implementation tracker · Started September 7, 2026 · Baseline commit <code>3a337f5</code>. No signed-in browser automation is authorized for this pass. The user performs final live syncs.</p>
+<section><h2>Acceptance contract</h2>
+<p>Export every conversation the connected provider account exposes, across all supported organizations/workspaces, normal history, archived history and projects where exposed. Preserve complete retrievable message trees, settings, attachments and generated assets. Never restrict by date. Preserve previously downloaded records. Discover new chats and revisit changed chats on subsequent syncs without duplicating stable identities.</p>
+<p>Inventory completeness, content completeness, archive freshness and successful replication are separate facts. A downloaded/discovered ratio alone cannot prove discovery completeness. Missing scopes, malformed responses, truncated pagination, expired assets and inaccessible records must remain explicit failures or limitations; they must never become a green “everything” claim. Deleted, temporary, expired or otherwise unexposed provider content cannot be reconstructed, and must not be promised.</p></section>
+<section><h2>Feature and evidence matrix</h2>
+<table><thead><tr><th>Feature</th><th>Required work and acceptance evidence</th><th>Status</th></tr></thead><tbody>
+<tr><td>Claude inventory</td><td>Handle supported pagination; surface failed organizations and malformed lists; don't silently assume a single request proves coverage. Check project scope discovery.</td><td id="claude">In progress</td></tr>
+<tr><td>Gemini inventory</td><td>Follow cursor chain; detect cycles and safety-limit exhaustion as errors; retain prior known IDs without mistaking retention for live discovery.</td><td id="gemini">In progress</td></tr>
+<tr><td>AI Studio inventory</td><td>Validate RPC envelopes and pagination; fail on cycles or exhaustion; preserve saved prompt metadata, detail and asset discovery.</td><td id="studio">In progress</td></tr>
+<tr><td>ChatGPT and Grok</td><td>Audit normal/archived/project/workspace discovery, pagination termination, resume freshness and unsupported scope handling; fix evidenced defects.</td><td id="managed">In progress</td></tr>
+<tr><td>Content freshness</td><td>Skip only when usable change evidence agrees; missing timestamps must trigger retrieval. Preserve old records during failed refreshes.</td><td id="freshness">In progress</td></tr>
+<tr><td>Validation</td><td>Match exact discovered identities against completion records, not counts. Do not let unrelated retained records hide missing current records. Surface inventory uncertainty.</td><td id="validation">In progress</td></tr>
+<tr><td>Scheduled sync</td><td>Persist failures and timestamps; show the latest automatic run on the dashboard. Explain account/tab prerequisites and actual provider coverage.</td><td id="schedule">In progress</td></tr>
+<tr><td>UI honesty</td><td>Replace capability labels that imply verified total account coverage; explain counts, retained records, refresh needs and manual handoff.</td><td id="ui">Pending</td></tr>
+<tr><td>Build delivery</td><td>Targeted regression tests for the changed failure paths; type checks; updated Firefox and Chrome packages with source and installation/store instructions.</td><td id="build">Pending</td></tr>
+<tr><td>Manual live acceptance</td><td>User runs each changed adapter once, checks known oldest/newest chats and project/archived examples, then downloads ZIP and replicates once. Record provider reports and gaps; no automatic claim of live success.</td><td>Awaiting user after builds</td></tr>
+</tbody></table></section>
+<section><h2>Implementation sequence and cost controls</h2><ol>
+<li>Fix silent data loss and false success first, in independent provider and orchestration changes.</li>
+<li>Test concrete failure cases with synthetic fixtures. No private exports, tokens, chat titles or account data enter Git.</li>
+<li>Integrate status reporting and create final builds. Re-run tests only after relevant changes or actual failures.</li>
+<li>Review this matrix at integration and handoff. Every open item must have a specific limitation or next action; no new framework, database, dependency or telemetry service is needed.</li>
+<li>Leave provider endpoint uncertainty to explicit live evidence instead of inventing undocumented API behavior. User manually verifies the final extension.</li>
+</ol></section>
+<section><h2>Progress and commits through time</h2><table><thead><tr><th>Date / checkpoint</th><th>Change</th><th>Commit / evidence</th><th>Result</th></tr></thead><tbody id="timeline">
+<tr><td>2026-09-07 · baseline</td><td>Source audit identified inventory, freshness and validation gaps.</td><td><code>3a337f5</code></td><td>Earlier 143/143 and 158/158 checks establish downloaded inventory coverage only.</td></tr>
+<tr><td>2026-09-07 · implementation start</td><td>Three GPT-6 Astra low-effort workers assigned inventory, orchestration, and ChatGPT/Grok coverage.</td><td>Working tree</td><td>Parent owns tracker, dashboard integration and final packaging.</td></tr>
+</tbody></table></section>
+<section><h2>Decisions and lessons</h2><ul id="decisions"><li>A safety limit is acceptable only if reaching it produces an incomplete result; returning a partial list as success is not acceptable.</li><li>A provider's terminal response is evidence of enumeration completion, not independent proof that its private API exposes every product feature.</li><li>Missing update timestamps are unknown freshness, not evidence that a chat is unchanged.</li><li>The original local project path was absent on this machine. Restored the published repository at <code>/home/travis/Projects/ConversationExporters</code>; no private archives were restored or modified.</li></ul></section>
+<section><h2>Manual handoff checklist</h2><p>After the final build, reload the unified extension and refresh signed-in provider tabs. AI Studio needs History and one saved prompt opened. Run providers separately. Check current discovery against a few known oldest, newest, archived and project chat IDs; report any omissions rather than accepting equal counts alone. Download the combined ZIP and verify its reports and a few known conversations. If replication is configured, send it once and verify the receiver copy. These checks remain pending until the user runs them.</p></section>
+</html>
