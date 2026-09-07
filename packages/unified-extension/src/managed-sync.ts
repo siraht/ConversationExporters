@@ -1,13 +1,13 @@
 import { IndexedDbArchiveFileSystem } from "@conversation-exporters/shared/indexeddb-filesystem";
 import { auditArchive } from "../../chatgpt-exporter/src/chatgpt/audit";
 import { ChatGptCaptureEngine } from "../../chatgpt-exporter/src/chatgpt/capture-engine";
-import { ChatGptClient } from "../../chatgpt-exporter/src/chatgpt/client";
+import { ChatGptClient, type ChatGptTransport as ChatGptTransportInterface } from "../../chatgpt-exporter/src/chatgpt/client";
 import { DEFAULT_INVENTORY_SETTINGS, runWorkspaceInventories } from "../../chatgpt-exporter/src/chatgpt/inventory";
 import { ControlledTransport } from "../../chatgpt-exporter/src/core/request-control";
 import { RuntimeApiTransport as ChatGptTransport } from "../../chatgpt-exporter/src/extension/protocol";
 import { CaptureEngine as GrokCaptureEngine } from "../../grok-exporter/src/core/capture-engine";
 import { RunControl } from "../../grok-exporter/src/core/control";
-import { DEFAULT_CAPTURE_SETTINGS, type ProgressEvent } from "../../grok-exporter/src/core/types";
+import { DEFAULT_CAPTURE_SETTINGS, type ProgressEvent, type ApiTransport } from "../../grok-exporter/src/core/types";
 import { GrokClient } from "../../grok-exporter/src/grok/client";
 import { BrowserAssetFetcher } from "../../grok-exporter/src/extension/asset-fetcher";
 import { RuntimeApiTransport as GrokTransport, type FindTabResult as GrokFindTabResult } from "../../grok-exporter/src/extension/protocol";
@@ -15,9 +15,21 @@ import type { SyncSummary } from "./types";
 
 export type ProgressReporter = (message: string) => void;
 export type CancellationRegistrar = (cancel: (() => void) | null) => void;
+export interface ManagedSyncDependencies {
+  chatGptTransport(tabId: number): ChatGptTransportInterface;
+  grokTransport(tabId: number): ApiTransport;
+  findGrokTab(): Promise<GrokFindTabResult>;
+  archiveChanged(namespace: "chatgpt-web" | "grok-web"): Promise<unknown>;
+}
+const defaultDependencies: ManagedSyncDependencies = {
+  chatGptTransport: (tabId) => new ChatGptTransport(tabId),
+  grokTransport: (tabId) => new GrokTransport(tabId),
+  findGrokTab: () => chrome.runtime.sendMessage({ type: "GROK_EXPORTER_FIND_TAB" }),
+  archiveChanged: (namespace) => chrome.runtime.sendMessage({ type: "UNIFIED_ARCHIVE_CHANGED", namespace }),
+};
 
-export async function syncManagedGrok(report: ProgressReporter, registerCancellation: CancellationRegistrar): Promise<SyncSummary> {
-  const tab = await chrome.runtime.sendMessage<{ type: "GROK_EXPORTER_FIND_TAB" }, GrokFindTabResult>({ type: "GROK_EXPORTER_FIND_TAB" });
+export async function syncManagedGrok(report: ProgressReporter, registerCancellation: CancellationRegistrar, dependencies = defaultDependencies): Promise<SyncSummary> {
+  const tab = await dependencies.findGrokTab();
   if (!tab.ok || tab.tabId === undefined) throw new Error(tab.error ?? "Open a signed-in Grok tab, then retry.");
   const control = new RunControl();
   registerCancellation(() => control.cancel());
@@ -25,7 +37,7 @@ export async function syncManagedGrok(report: ProgressReporter, registerCancella
   await filesystem.ready();
   try {
     const client = new GrokClient({
-      transport: new GrokTransport(tab.tabId),
+      transport: dependencies.grokTransport(tab.tabId),
       settings: DEFAULT_CAPTURE_SETTINGS,
       cancellation: control,
       onProgress: (event: ProgressEvent) => report(`Grok · ${event.message}`),
@@ -37,31 +49,31 @@ export async function syncManagedGrok(report: ProgressReporter, registerCancella
       onProgress: (event) => report(`Grok · ${event.message}`),
       assetFetcher: new BrowserAssetFetcher(),
     }).run();
-    await chrome.runtime.sendMessage({ type: "UNIFIED_ARCHIVE_CHANGED", namespace: "grok-web" });
+    await dependencies.archiveChanged("grok-web");
     return {
       provider: "grok",
       discovered: result.inventoryCount,
       fetched: Math.max(0, result.completeCount - result.unchangedCount),
       unchanged: result.unchangedCount,
       retained: result.missingRemoteConversationIds.length,
-      failed: result.failedCount,
+      failed: Math.max(result.failedCount + result.assetFailureCount, result.complete ? 0 : 1),
     };
   } finally { registerCancellation(null); }
 }
 
-export async function syncManagedChatGpt(report: ProgressReporter, registerCancellation: CancellationRegistrar): Promise<SyncSummary> {
+export async function syncManagedChatGpt(report: ProgressReporter, registerCancellation: CancellationRegistrar, dependencies = defaultDependencies): Promise<SyncSummary> {
   report("ChatGPT · Finding accessible workspaces…");
   const tabs = (await chrome.tabs.query({ url: "https://chatgpt.com/*" }))
     .filter((tab): tab is chrome.tabs.Tab & { id: number } => tab.id !== undefined)
     .sort((left, right) => (right.lastAccessed ?? 0) - (left.lastAccessed ?? 0));
   if (!tabs.length) throw new Error("Open a signed-in ChatGPT tab, then retry.");
-  let runtime: ChatGptTransport | undefined;
+  let runtime: ChatGptTransportInterface | undefined;
   let client: ChatGptClient | undefined;
   let discovered: Awaited<ReturnType<ChatGptClient["discoverWorkspaces"]>> = [];
   let lastError: unknown;
   for (const tab of tabs) {
     try {
-      const candidateRuntime = new ChatGptTransport(tab.id);
+      const candidateRuntime = dependencies.chatGptTransport(tab.id);
       const candidateClient = new ChatGptClient(candidateRuntime);
       const candidateWorkspaces = (await candidateClient.discoverWorkspaces()).filter((workspace) => !workspace.deactivated);
       runtime = candidateRuntime;
@@ -109,9 +121,10 @@ export async function syncManagedChatGpt(report: ProgressReporter, registerCance
       unchanged += result.skippedCount;
       failed += result.failedCount;
       report(`ChatGPT · Validating ${workspace.label}…`);
-      await auditArchive({ filesystem, extensionVersion: chrome.runtime.getManifest().version });
+      const audit = await auditArchive({ filesystem, extensionVersion: chrome.runtime.getManifest().version });
+      if (audit.terminalState !== "complete") failed += Math.max(1, audit.findings.filter((finding) => finding.severity === "error").length);
     }
-    await chrome.runtime.sendMessage({ type: "UNIFIED_ARCHIVE_CHANGED", namespace: "chatgpt-web" });
+    await dependencies.archiveChanged("chatgpt-web");
     return { provider: "chatgpt", discovered: inventoryCount, fetched: fetched + rebuilt, unchanged, retained: 0, failed };
   } finally { registerCancellation(null); }
 }
