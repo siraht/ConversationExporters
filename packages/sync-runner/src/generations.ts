@@ -34,6 +34,12 @@ async function syncDirectory(path: string): Promise<void> {
 }
 export class GenerationStore {
   constructor(readonly root: string) {}
+  async checkSpace(bytes = 0): Promise<void> {
+    const capacity = await statfs(this.root);
+    const floor = Number(process.env.CONVERSATION_MIN_FREE_BYTES ?? 2 * 1024 ** 3);
+    if (!Number.isSafeInteger(floor) || floor < 0) throw new Error("Invalid minimum free space");
+    if (capacity.bavail * capacity.bsize - bytes < floor) throw new Error("Local export disk is low on space; pending archives were retained");
+  }
   staging(id: string): string {
     if (!/^[a-f0-9-]{36}$/.test(id)) throw new Error("Invalid generation ID");
     return join(this.root, ".generations", id);
@@ -41,10 +47,7 @@ export class GenerationStore {
   async begin(namespace: string): Promise<string> {
     if (!NAMESPACES.includes(namespace as typeof NAMESPACES[number])) throw new Error("Unsupported namespace");
     await mkdir(this.root, { recursive: true, mode: 0o700 });
-    const capacity = await statfs(this.root);
-    const floor = Number(process.env.CONVERSATION_MIN_FREE_BYTES ?? 2 * 1024 ** 3);
-    if (!Number.isSafeInteger(floor) || floor < 0) throw new Error("Invalid minimum free space");
-    if (capacity.bavail * capacity.bsize < floor) throw new Error("Local export disk is low on space; pending archives were retained");
+    await this.checkSpace();
     const id = randomUUID();
     await mkdir(join(this.staging(id), "files"), { recursive: true, mode: 0o700 });
     await durableJson(join(this.staging(id), "owner.json"), { namespace });

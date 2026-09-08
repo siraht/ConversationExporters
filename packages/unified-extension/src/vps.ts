@@ -6,16 +6,21 @@ export interface VpsSummary { uploaded: number; unchanged: number; failed: numbe
 export async function syncFilesystem(namespace: string, filesystem: ArchiveFileSystem, settings: VpsSettings): Promise<VpsSummary> {
   if (!settings.enabled) return { uploaded: 0, unchanged: 0, failed: 0 };
   validateSettings(settings);
-  const stateKey = `conversationExporters.vpsState.${namespace}`;
+  const destination = new URL(settings.baseUrl).href.replace(/\/+$/, "");
+  const stateKey = `conversationExporters.vpsState.${await sha256Hex(destination)}.${namespace}`;
   const state = ((await chrome.storage.local.get(stateKey))[stateKey] ?? {}) as Record<string, string>;
   let uploaded = 0, unchanged = 0, failed = 0;
   for (const path of await filesystem.listPaths()) {
     const bytes = await filesystem.readBytes(path); if (!bytes) continue;
     const hash = await sha256Hex(bytes);
-    if (state[path] === hash) { unchanged += 1; continue; }
     try {
       const url = `${settings.baseUrl}/v1/archives/${encodeURIComponent(namespace)}/files/${path.split("/").map(encodeURIComponent).join("/")}`;
-      const response = await fetch(url, { method: "PUT", headers: { Authorization: `Bearer ${settings.token}`, "Content-Type": "application/octet-stream", "X-Content-SHA256": hash }, body: ownedBuffer(bytes) });
+      if (state[path] === hash) {
+        const remote = await fetch(url, { method: "HEAD", headers: { Authorization: `Bearer ${settings.token}` }, signal: AbortSignal.timeout(30_000) });
+        if (remote.ok && remote.headers.get("x-content-sha256") === hash) { unchanged += 1; continue; }
+        if (remote.status === 401 || remote.status === 403) throw new Error("Receiver access denied");
+      }
+      const response = await fetch(url, { method: "PUT", headers: { Authorization: `Bearer ${settings.token}`, "Content-Type": "application/octet-stream", "X-Content-SHA256": hash }, body: ownedBuffer(bytes), signal: AbortSignal.timeout(120_000) });
       if (!response.ok) throw new Error(`VPS upload failed (${response.status})`);
       state[path] = hash; uploaded += 1; await chrome.storage.local.set({ [stateKey]: state });
     } catch { failed += 1; }
@@ -25,7 +30,7 @@ export async function syncFilesystem(namespace: string, filesystem: ArchiveFileS
 
 export async function testVps(settings: VpsSettings): Promise<void> {
   validateSettings(settings);
-  const response = await fetch(`${settings.baseUrl}/v1/status`, { headers: { Authorization: `Bearer ${settings.token}` } });
+  const response = await fetch(`${settings.baseUrl}/v1/status`, { headers: { Authorization: `Bearer ${settings.token}` }, signal: AbortSignal.timeout(30_000) });
   if (!response.ok) throw new Error(`VPS connection failed (${response.status})`);
 }
 function validateSettings(value: VpsSettings): void {

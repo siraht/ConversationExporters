@@ -81,9 +81,49 @@ class DeliveryTest(unittest.TestCase):
 
     def test_failed_import_retries_without_new_upload(self):
         root = self.generation("claude-web", {"conversations/a/conversation.json": {"uuid": "a", "chat_messages": [{"sender": "human", "text": "test"}]}})
-        self.transfer(root)
+        plan = self.transfer(root)
         with patch.object(d, "import_directory", side_effect=RuntimeError("injected")):
             self.assertFalse(d.process_generations(*self.target)[0]["imported"])
         self.assertTrue(d.process_generations(*self.target)[0]["imported"])
+        from types import SimpleNamespace
+        receipt = d.status(SimpleNamespace(root=self.target[0].root, batch=plan.batch_id))
+        self.assertTrue(receipt["imported"])
+        self.assertFalse(receipt["indexed"])
+
+    def test_two_generations_are_both_imported_and_assets_are_retained(self):
+        for number in (1, 2):
+            root = self.generation("gemini-web", {
+                "conversations/a/conversation.json": {"id": "same-id", "messages": [{"id": "m", "role": "user", "content": f"Revision {number}"}]},
+                "conversations/a/assets.json": [{"path": "conversations/a/assets/example.txt"}],
+                "conversations/a/assets/example.txt": "synthetic attached document",
+            }, suffix=str(number))
+            self.transfer(root)
+        results = d.process_generations(*self.target)
+        self.assertEqual(len(results), 2)
+        self.assertTrue(all(r.get("imported") for r in results), results)
+        self.assertEqual(sum(r["new_versions"] for r in results), 2)
+        directories = list((self.target[0].root / "portable").iterdir())
+        self.assertEqual(len(directories), 1)  # stable identity, two versions
+        text = next(directories[0].glob("*.jsonl")).read_text()
+        self.assertIn("source_path", text)
+
+    def test_semantic_receipt_stays_pending_on_model_failure(self):
+        from types import SimpleNamespace
+        path = self.target[0].root / "run/web-delivery/example.json"
+        d.save(path, {"indexed": True, "semantic": "pending"})
+        args = SimpleNamespace(root=self.target[0].root, pause_unit=[])
+        with patch("agent_session_archive.refresh.backfill_quality", side_effect=RuntimeError("injected")):
+            with self.assertRaises(RuntimeError): d.semantic(args)
+        self.assertEqual(d.read(path)["semantic"], "pending")
+
+    def test_new_index_work_does_not_reset_old_semantic_receipts(self):
+        from types import SimpleNamespace
+        old = {"snapshotId": "old", "imported": True, "indexed": True, "semantic": "complete"}
+        new = {"snapshotId": "new", "imported": True, "indexed": False}
+        args = SimpleNamespace(root=self.target[0].root, pause_unit=[])
+        with patch.object(d, "ingest_ready", return_value=[]), patch.object(d, "process_generations", return_value=[old, new]), patch.object(d, "refresh_portable", return_value={"changed_paths": 1}):
+            d.process(args)
+        self.assertEqual(old["semantic"], "complete")
+        self.assertEqual(new["semantic"], "pending")
 
 if __name__ == "__main__": unittest.main()

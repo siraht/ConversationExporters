@@ -98,7 +98,8 @@ async function execute(request: RequestMessage): Promise<unknown> {
       const current = requireWrite(request.writeId);
       if (typeof request.data !== "string" || request.data.length > 400_000) throw new Error("invalid write chunk");
       const bytes = Buffer.from(request.data, "base64");
-      if (!current.stream.write(bytes)) await new Promise<void>((resolveDrain) => current.stream.once("drain", resolveDrain));
+      await generations.checkSpace(bytes.byteLength);
+      await new Promise<void>((resolveWrite, reject) => current.stream.write(bytes, (error) => error ? reject(error) : resolveWrite()));
       return bytes.byteLength;
     }
     case "writeEnd": {

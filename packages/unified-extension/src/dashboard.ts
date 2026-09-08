@@ -150,6 +150,8 @@ async function saveStorage(): Promise<void> {
     const requested = {} as chrome.permissions.Permissions & { data_collection?: string[] };
     if (vpsEnabled.checked) {
       requested.origins = [`${new URL(vpsUrl.value).origin}/*`];
+    }
+    if (vpsEnabled.checked || nativeEnabled.checked) {
       const manifest = chrome.runtime.getManifest() as chrome.runtime.Manifest & { browser_specific_settings?: { gecko?: unknown } };
       if (manifest.browser_specific_settings?.gecko) requested.data_collection = ["personalCommunications", "websiteContent"];
     }

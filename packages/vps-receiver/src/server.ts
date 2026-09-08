@@ -2,9 +2,10 @@ import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { mkdir, open, rename, rm } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
+import { createReadStream } from "node:fs";
 import { pathToFileURL } from "node:url";
 
-const NAMESPACES = new Set(["chatgpt-web", "claude-web", "gemini-web", "google-ai-studio", "grok-web"]);
+const NAMESPACES = new Set(["chatgpt-web", "claude-web", "gemini-web", "google-ai-studio", "grok-web", "run-history"]);
 
 export interface ReceiverOptions { root: string; token: string; maxBytes?: number }
 
@@ -25,7 +26,7 @@ async function route(request: IncomingMessage, response: ServerResponse, options
   const url = new URL(request.url ?? "/", "http://receiver.invalid");
   if (request.method === "GET" && url.pathname === "/v1/status") { json(response, 200, { ok: true, service: "conversation-archive-receiver", version: 1 }); return; }
   const match = /^\/v1\/archives\/([^/]+)\/files\/(.+)$/.exec(url.pathname);
-  if (request.method !== "PUT" || !match) { json(response, 404, { ok: false, error: "not found" }); return; }
+  if (!["PUT", "HEAD"].includes(request.method ?? "") || !match) { json(response, 404, { ok: false, error: "not found" }); return; }
   const namespace = decode(match[1]!);
   if (!NAMESPACES.has(namespace)) { json(response, 400, { ok: false, error: "unsupported archive namespace" }); return; }
   const parts = match[2]!.split("/").map(decode);
@@ -35,6 +36,12 @@ async function route(request: IncomingMessage, response: ServerResponse, options
   const base = resolve(options.root, "live", namespace);
   const destination = resolve(base, ...parts);
   if (destination !== base && !destination.startsWith(`${base}${sep}`)) { json(response, 400, { ok: false, error: "unsafe archive path" }); return; }
+  if (request.method === "HEAD") {
+    const hash = createHash("sha256");
+    try { for await (const chunk of createReadStream(destination)) hash.update(chunk); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") { response.writeHead(404); response.end(); return; } throw error; }
+    response.writeHead(200, { "X-Content-SHA256": hash.digest("hex"), "Cache-Control": "no-store" }); response.end(); return;
+  }
   const expectedHash = request.headers["x-content-sha256"];
   if (typeof expectedHash !== "string" || !/^[a-f0-9]{64}$/.test(expectedHash)) { json(response, 400, { ok: false, error: "missing or invalid content hash" }); return; }
   await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
@@ -73,8 +80,9 @@ function authorized(request: IncomingMessage, token: string): boolean {
 }
 function cors(response: ServerResponse): void {
   response.setHeader("Access-Control-Allow-Origin", "*");
-  response.setHeader("Access-Control-Allow-Methods", "GET, PUT, OPTIONS");
+  response.setHeader("Access-Control-Allow-Methods", "GET, HEAD, PUT, OPTIONS");
   response.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Content-SHA256");
+  response.setHeader("Access-Control-Expose-Headers", "X-Content-SHA256");
 }
 function json(response: ServerResponse, status: number, value: unknown): void { response.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }); response.end(JSON.stringify(value)); }
 

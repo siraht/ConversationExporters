@@ -23,6 +23,8 @@ describe("conversation archive receiver", () => {
       const hash = createHash("sha256").update(body).digest("hex");
       const response = await fetch(`${base}/v1/archives/gemini-web/files/nested/conversations.json`, { method: "PUT", headers: { Authorization: `Bearer ${token}`, "X-Content-SHA256": hash }, body });
       expect(response.status).toBe(200);
+      const verified = await fetch(`${base}/v1/archives/gemini-web/files/nested/conversations.json`, { method: "HEAD", headers: { Authorization: `Bearer ${token}` } });
+      expect(verified.headers.get("x-content-sha256")).toBe(hash);
       expect(await readFile(join(root, "live/gemini-web/nested/conversations.json"), "utf8")).toBe("archived conversation");
       const bad = await fetch(`${base}/v1/archives/gemini-web/files/bad.json`, { method: "PUT", headers: { Authorization: `Bearer ${token}`, "X-Content-SHA256": "0".repeat(64) }, body });
       expect(bad.status).toBe(400);

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 from contextlib import closing
 from dataclasses import asdict, replace
 import fcntl
@@ -35,7 +36,7 @@ from agent_session_archive.transfer import prepare_transfer, _ssh, SSH_TRANSPORT
 from agent_session_archive.ingest import ingest_ready
 from agent_session_archive.blobs import BlobStore
 from agent_session_archive.util import atomic_write, canonical_json_bytes, sha256_file
-from agent_session_archive.refresh import refresh_received
+from agent_session_archive.refresh import refresh_portable
 from agent_session_archive import web_ingest
 from agent_session_archive.adapters.base import Adapter, Candidate, Detection, message_event, text_blocks, fidelity_event, asset_block
 from agent_session_archive.adapters.claude_web import ClaudeAdapter
@@ -135,7 +136,7 @@ def deliver(args):
         if not entry:
             local = read(generation / "receipt.json", {})
             entry.update({"status": "queued", "bytes": local.get("bytes", 0)})
-        if entry.get("semantic") == "complete" and entry.get("indexed"):
+        if entry.get("semantic") in {"complete", "not-required"} and entry.get("indexed"):
             continue
         if entry.get("nextAttemptAt") and datetime.fromisoformat(entry["nextAttemptAt"]) > datetime.now(timezone.utc):
             continue
@@ -171,7 +172,7 @@ def deliver(args):
     summary = {"schema": "conversation-delivery-status/1", "checkedAt": now(), "status": "attention" if failures else "idle", "destination": host,
                "queued": sum(not x.get("receivedAt") for x in entries), "queuedBytes": sum(x.get("bytes", 0) for x in entries if not x.get("receivedAt")),
                "received": sum(bool(x.get("receivedAt")) for x in entries), "imported": sum(x.get("imported") is True for x in entries),
-               "indexed": sum(x.get("indexed") is True for x in entries), "semanticPending": sum(x.get("imported") is True and x.get("semantic") != "complete" for x in entries),
+               "indexed": sum(x.get("indexed") is True for x in entries), "semanticPending": sum(x.get("imported") is True and x.get("semantic") not in {"complete", "not-required"} for x in entries),
                "failed": len(failures), "generations": entries[-100:]}
     save(root / "delivery-status.json", summary)
     return summary
@@ -204,7 +205,15 @@ class CurrentDirectoryAdapter(Adapter):
 
     def parse(self, candidate, account_id, raw_sha256):
         if self.provider == "claude-web":
-            document = ClaudeAdapter().parse(candidate, account_id, raw_sha256)
+            payload = copy.deepcopy(candidate.payload)
+            # Provider sandbox paths are not paths on the archive host. The verified
+            # exporter assets.json supplies local references; originals stay in raw.
+            for message in payload.get("chat_messages") or payload.get("messages") or []:
+                for field in ("attachments", "files"):
+                    for attachment in message.get(field) or []:
+                        if isinstance(attachment, dict):
+                            attachment.pop("path", None)
+            document = ClaudeAdapter().parse(replace(candidate, payload=payload), account_id, raw_sha256)
         elif self.provider == "gemini-web":
             document = GeminiAdapter().parse(candidate, account_id, raw_sha256)
         elif self.provider == "grok-web":
@@ -288,6 +297,8 @@ def process_generations(config, registry):
                 result = import_directory(config, registry, root, manifest, str(row["machine_id"]))
                 validation = read(root / "validation.json", {})
                 receipt.update({"generationId": manifest["id"], "namespace": manifest["namespace"], "imported": True, "importedAt": now(), "coverageComplete": validation.get("valid") is True, **result})
+                if result.get("metadataOnly"):
+                    receipt.update({"indexed": True, "indexRequired": False, "semantic": "not-required"})
                 receipt.pop("error", None)
         except Exception as exc:
             receipt.update({"imported": False, "error": f"{type(exc).__name__}: generation validation or adapter import failed"})
@@ -308,10 +319,12 @@ def process(args):
     if not any(r.get("imported") and not r.get("indexed") for r in results):
         return {"receivedBatches": len(received), "generations": results, "index": {"status": "unchanged"}}
     try:
-        lexical = refresh_received(replace(config, index=replace(config.index, semantic_updates=False)), registry)
+        # Web imports add portable records only. Native capture has its own worker;
+        # do not scan every native machine while draining this queue.
+        lexical = refresh_portable(replace(config, index=replace(config.index, semantic_updates=False)), registry)
         for receipt in results:
-            if receipt.get("imported"):
-                receipt.update({"indexed": True, "indexedAt": now(), "semantic": "pending"})
+            if receipt.get("imported") and not receipt.get("indexed"):
+                receipt.update({"indexed": True, "indexedAt": now(), "semantic": "pending" if lexical.get("changed_paths", 0) else "not-required"})
                 save(config.root / "run" / "web-delivery" / f"{receipt['snapshotId']}.json", receipt)
     except Exception as exc:
         lexical = {"error": type(exc).__name__}
@@ -323,7 +336,7 @@ def semantic(args):
             return {"status": "deferred", "reason": "Existing archive maintenance is active"}
     config = load_config(root=args.root)
     pending = [(path, read(path)) for path in (config.root / "run/web-delivery").glob("*.json")]
-    pending = [(path, receipt) for path, receipt in pending if receipt.get("indexed") and receipt.get("semantic") != "complete"]
+    pending = [(path, receipt) for path, receipt in pending if receipt.get("indexed") and receipt.get("semantic") not in {"complete", "not-required"}]
     if not pending:
         return {"status": "unchanged"}
     # This existing driver owns the refresh lock and durable model checkpoints.
@@ -358,6 +371,8 @@ def status(args):
 
 def main():
     os.umask(0o077)
+    # Explicit CLI roots win over an interactive shell's unrelated ASM default.
+    os.environ.pop("ASM_ARCHIVE_ROOT", None)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("deliver", "process", "status", "semantic"))
     parser.add_argument("--root", type=Path)

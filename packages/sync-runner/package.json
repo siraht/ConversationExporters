@@ -12,7 +12,7 @@
     "check": "npm run typecheck && npm test && npm run build",
     "install:native": "sh scripts/install-native-host.sh",
     "install:systemd": "sh scripts/install-systemd.sh",
-    "test": "vitest run",
+    "test": "npm run build && vitest run",
     "typecheck": "tsc --noEmit"
   },
   "engines": {
