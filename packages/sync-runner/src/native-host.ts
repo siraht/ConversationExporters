@@ -1,14 +1,17 @@
 #!/usr/bin/env node
 import { randomUUID } from "node:crypto";
 import { createWriteStream, type WriteStream } from "node:fs";
-import { mkdir, open, readdir, rename, stat, unlink } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, rename, stat, unlink } from "node:fs/promises";
+import { GenerationStore, type GenerationFile, NAMESPACES } from "./generations.js";
 import { homedir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 
 interface RequestMessage {
   id: string;
   operation: string;
-  namespace: "chatgpt-web" | "claude-web" | "gemini-web" | "google-ai-studio" | "grok-web";
+  namespace: typeof NAMESPACES[number];
+  generationId?: string;
+  entry?: GenerationFile;
   path?: string;
   prefix?: string;
   writeId?: string;
@@ -24,6 +27,8 @@ interface OpenWrite {
 }
 
 const dataRoot = process.env.CONVERSATION_SYNC_ROOT || join(homedir(), "ConversationImports");
+const generations = new GenerationStore(dataRoot);
+const ownedGenerations = new Set<string>();
 const writes = new Map<string, OpenWrite>();
 let input = Buffer.alloc(0);
 let queue = Promise.resolve();
@@ -59,7 +64,21 @@ function drain(): void {
 
 async function execute(request: RequestMessage): Promise<unknown> {
   if (!request || typeof request.id !== "string") throw new Error("invalid native request");
-  const root = namespaceRoot(request.namespace);
+  namespaceRoot(request.namespace);
+  if (request.operation === "beginGeneration") {
+    const id = await generations.begin(request.namespace); ownedGenerations.add(id); return id;
+  }
+  if (request.operation === "deliveryStatus") {
+    try { return JSON.parse(await readFile(join(dataRoot, "delivery-status.json"), "utf8")); }
+    catch (error) { if (isMissing(error)) return { status: "not-configured", message: "Install and configure the delivery timer to push committed exports." }; throw error; }
+  }
+  if (request.generationId && !ownedGenerations.has(request.generationId)) throw new Error("Unknown generation in this connection");
+  if (request.operation === "commitGeneration" && request.generationId) {
+    const receipt = await generations.commit(request.generationId, request.namespace);
+    ownedGenerations.delete(request.generationId); return receipt;
+  }
+  if (request.operation === "reuseObject" && request.generationId && request.entry) return generations.reuse(request.generationId, request.namespace, request.entry);
+  const root = request.generationId ? await generations.filesRoot(request.generationId, request.namespace) : namespaceRoot(request.namespace);
   switch (request.operation) {
     case "writeStart": {
       const target = targetPath(root, request.path);
@@ -86,6 +105,8 @@ async function execute(request: RequestMessage): Promise<unknown> {
       const writeId = requiredToken(request.writeId, "write ID");
       const current = requireWrite(writeId);
       await new Promise<void>((resolveEnd, reject) => current.stream.end((error?: Error | null) => error ? reject(error) : resolveEnd()));
+      const handle = await open(current.temporary, "r");
+      try { await handle.sync(); } finally { await handle.close(); }
       await rename(current.temporary, current.target);
       writes.delete(writeId);
       return true;
@@ -145,7 +166,7 @@ async function execute(request: RequestMessage): Promise<unknown> {
 }
 
 function namespaceRoot(namespace: RequestMessage["namespace"]): string {
-  if (namespace !== "chatgpt-web" && namespace !== "claude-web" && namespace !== "gemini-web" && namespace !== "google-ai-studio" && namespace !== "grok-web") {
+  if (!NAMESPACES.includes(namespace)) {
     throw new Error("unsupported archive namespace");
   }
   return resolve(dataRoot, "live", namespace);

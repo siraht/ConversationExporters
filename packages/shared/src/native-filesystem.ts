@@ -8,11 +8,22 @@ interface NativeReply {
   error?: string;
 }
 
-export type NativeArchiveNamespace = "chatgpt-web" | "claude-web" | "gemini-web" | "google-ai-studio" | "grok-web";
+export type NativeArchiveNamespace = "chatgpt-web" | "claude-web" | "gemini-web" | "google-ai-studio" | "grok-web" | "run-history";
 
 export class NativeArchiveFileSystem implements ArchiveFileSystem {
   private readonly port = chrome.runtime.connectNative("com.conversation_exporters.archive");
   private readonly pending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void }>();
+  private generationId: string | undefined;
+
+  async beginGeneration(): Promise<string> {
+    const id = await this.request("beginGeneration", {});
+    if (typeof id !== "string") throw new Error("Native host needs updating: generation protocol unavailable");
+    this.generationId = id; return id;
+  }
+  async reuseObject(entry: { path: string; sha256: string; size: number }): Promise<boolean> { return await this.request("reuseObject", { entry }) === true; }
+  async commitGeneration(): Promise<unknown> { const result = await this.request("commitGeneration", {}); this.generationId = undefined; return result; }
+  async deliveryStatus(): Promise<unknown> { return this.request("deliveryStatus", {}); }
+  close(): void { this.port.disconnect(); }
 
   constructor(private readonly namespace: NativeArchiveNamespace, private readonly prefix = "") {
     if (prefix) assertSafeRelativePath(prefix);
@@ -124,8 +135,10 @@ export class NativeArchiveFileSystem implements ArchiveFileSystem {
   private async request(operation: string, fields: Record<string, unknown>): Promise<unknown> {
     const id = crypto.randomUUID();
     return await new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this.port.postMessage({ id, operation, namespace: this.namespace, ...fields });
+      const timeout = setTimeout(() => { this.pending.delete(id); reject(new Error("Native archive operation timed out; pending files were retained")); }, operation === "commitGeneration" ? 600_000 : 120_000);
+      this.pending.set(id, { resolve: (value) => { clearTimeout(timeout); resolve(value); }, reject: (error) => { clearTimeout(timeout); reject(error); } });
+      try { this.port.postMessage({ id, operation, namespace: this.namespace, ...(this.generationId ? { generationId: this.generationId } : {}), ...fields }); }
+      catch (error) { clearTimeout(timeout); this.pending.delete(id); reject(error); }
     });
   }
 
