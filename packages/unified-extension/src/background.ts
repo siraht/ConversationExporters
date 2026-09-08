@@ -117,7 +117,7 @@ async function saveSettings(raw: unknown): Promise<void> {
     nativeEnabled: candidate?.nativeEnabled === true,
     accountLabel: String(candidate?.accountLabel ?? previous.accountLabel ?? "personal"),
   };
-  if (!/^[a-zA-Z0-9._-]{1,128}$/.test(settings.accountLabel!)) throw new Error("Account label must use 1–128 letters, numbers, dots, underscores or hyphens");
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(settings.accountLabel!)) throw new Error("Account label must begin with a letter or number and use 1–128 letters, numbers, dots, underscores or hyphens");
   if (settings.vpsEnabled) await testVps({ enabled: true, baseUrl: settings.vpsBaseUrl, token: settings.vpsToken });
   await chrome.storage.local.set({ [SETTINGS_KEY]: settings });
 }
@@ -158,10 +158,10 @@ async function syncArchive(namespace: NativeArchiveNamespace): Promise<{ vpsFile
 }
 
 async function mirrorToNative(namespace: NativeArchiveNamespace, browser: ArchiveFileSystem): Promise<{ changed: number; failed: number }> {
-  const native = new NativeArchiveFileSystem(namespace);
   // Capture immutable Blob references in one readonly transaction, not live rereads.
   const entries = await listBrowserArchiveEntries(namespace);
-  if (!entries.length) { native.close(); return { changed: 0, failed: 0 }; }
+  if (!entries.length) return { changed: 0, failed: 0 };
+  const native = new NativeArchiveFileSystem(namespace);
   let changed = 0;
   try {
     const id = await native.beginGeneration();

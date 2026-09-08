@@ -74,7 +74,7 @@ export class GenerationStore {
   async commit(id: string, namespace: string): Promise<{ id: string; status: "queued"; files: number; bytes: number }> {
     const root = await this.filesRoot(id, namespace);
     const manifest = JSON.parse(await readFile(join(root, "_generation.json"), "utf8")) as GenerationManifest;
-    if (manifest.schema !== "conversation-export-generation/1" || manifest.id !== id || manifest.namespace !== namespace || !/^[a-zA-Z0-9._-]{1,128}$/.test(manifest.account) || !Array.isArray(manifest.files)) throw new Error("Invalid generation manifest");
+    if (manifest.schema !== "conversation-export-generation/1" || manifest.id !== id || manifest.namespace !== namespace || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(manifest.account) || !Array.isArray(manifest.files)) throw new Error("Invalid generation manifest");
     const seen = new Set<string>();
     let bytes = 0;
     await mkdir(join(this.root, "objects"), { recursive: true, mode: 0o700 });

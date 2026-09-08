@@ -52,7 +52,7 @@ async function refreshStorageHealth(repair: boolean): Promise<void> {
       const response = await chrome.runtime.sendMessage({ type: "UNIFIED_DELIVERY_STATUS" });
       if (!response.ok) throw new Error(response.error);
       const d = response.result;
-      delivery.textContent = d.message ?? `VPS delivery: ${d.queued ?? 0} queued (${((d.queuedBytes ?? 0) / 1024 ** 2).toFixed(1)} MiB), ${d.received ?? 0} received, ${d.imported ?? 0} imported, ${d.indexed ?? 0} searchable, ${d.semanticPending ?? 0} awaiting semantic indexing. ${d.failed ? `${d.failed} need attention.` : ""}`;
+      delivery.textContent = d.message ?? `VPS delivery${d.phase ? ` (${d.phase})` : ""}: ${d.queued ?? 0} queued (${((d.queuedBytes ?? 0) / 1024 ** 2).toFixed(1)} MiB), ${d.received ?? 0} received, ${d.imported ?? 0} imported, ${d.indexed ?? 0} searchable, ${d.semanticPending ?? 0} awaiting semantic indexing. ${d.failed ? `${d.failed} need attention.` : ""}`;
     } catch (error) { delivery.textContent = `Delivery: ${messageOf(error)}`; }
   }
 }

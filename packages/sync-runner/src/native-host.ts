@@ -69,8 +69,7 @@ async function execute(request: RequestMessage): Promise<unknown> {
     const id = await generations.begin(request.namespace); ownedGenerations.add(id); return id;
   }
   if (request.operation === "deliveryStatus") {
-    try { return JSON.parse(await readFile(join(dataRoot, "delivery-status.json"), "utf8")); }
-    catch (error) { if (isMissing(error)) return { status: "not-configured", message: "Install and configure the delivery timer to push committed exports." }; throw error; }
+    return deliveryStatus();
   }
   if (request.generationId && !ownedGenerations.has(request.generationId)) throw new Error("Unknown generation in this connection");
   if (request.operation === "commitGeneration" && request.generationId) {
@@ -164,6 +163,36 @@ async function execute(request: RequestMessage): Promise<unknown> {
     default:
       throw new Error("unsupported native archive operation");
   }
+}
+
+async function deliveryStatus(): Promise<unknown> {
+  let summary: Record<string, unknown> = { status: "not-configured" };
+  let states: Record<string, Record<string, unknown>> = {};
+  try {
+    summary = JSON.parse(await readFile(join(dataRoot, "delivery-status.json"), "utf8"));
+    if (typeof summary.stateFile === "string" && /^delivery-state-[a-f0-9]{20}\.json$/.test(summary.stateFile)) {
+      states = JSON.parse(await readFile(join(dataRoot, summary.stateFile), "utf8")).generations;
+    }
+  } catch (error) { if (!isMissing(error)) throw error; }
+  // Newly committed snapshots are visible immediately, even before the next timer.
+  try {
+    for (const directory of await readdir(join(dataRoot, "outbox"), { withFileTypes: true })) {
+      if (!directory.isDirectory() || states[directory.name]) continue;
+      states[directory.name] = JSON.parse(await readFile(join(dataRoot, "outbox", directory.name, "receipt.json"), "utf8"));
+    }
+  } catch (error) { if (!isMissing(error)) throw error; }
+  const entries = Object.values(states);
+  return { ...summary,
+    queued: entries.filter((entry) => !entry.receivedAt).length,
+    queuedBytes: entries.filter((entry) => !entry.receivedAt).reduce((sum, entry) => sum + Number(entry.bytes ?? 0), 0),
+    received: entries.filter((entry) => entry.receivedAt).length,
+    imported: entries.filter((entry) => entry.imported === true).length,
+    indexed: entries.filter((entry) => entry.indexed === true).length,
+    semanticPending: entries.filter((entry) => entry.imported && !["complete", "not-required"].includes(String(entry.semantic))).length,
+    failed: entries.filter((entry) => entry.error).length,
+    phase: entries.find((entry) => ["snapshotting", "transferring"].includes(String(entry.status)) && !entry.error)?.status,
+    ...(summary.status === "not-configured" ? { message: `${entries.length} local snapshots queued. Install/configure the delivery timer to push them.` } : {}),
+  };
 }
 
 function namespaceRoot(namespace: RequestMessage["namespace"]): string {

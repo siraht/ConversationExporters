@@ -35,6 +35,7 @@ it("writes and commits a generation through real native-message framing", async 
     await write("conversation.json", content);
     await write("_generation.json", JSON.stringify({ schema: "conversation-export-generation/1", id: generationId, namespace: "claude-web", account: "personal", createdAt: new Date().toISOString(), files: [{ path: "conversation.json", size: Buffer.byteLength(content), sha256: createHash("sha256").update(content).digest("hex") }] }));
     expect(await ask("commitGeneration", { generationId })).toMatchObject({ status: "queued", files: 1 });
+    expect(await ask("deliveryStatus")).toMatchObject({ queued: 1, queuedBytes: Buffer.byteLength(content), received: 0 });
     expect(await readFile(join(root, "outbox", String(generationId), "files", "conversation.json"), "utf8")).toBe(content);
     await expect(ask("writeStart", { generationId, path: "late.json", writeId: randomUUID() })).rejects.toThrow("Unknown generation");
   } finally { child.kill(); await new Promise<void>((resolve) => child.on("close", () => resolve())); await rm(root, { recursive: true, force: true }); }

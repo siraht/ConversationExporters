@@ -72,7 +72,7 @@ Description=Check for {'queued exports' if args.mode == 'laptop' else 'received 
 
 [Timer]
 OnStartupSec=2min
-OnUnitActiveSec={'5min' if args.mode == 'laptop' else '2min'}
+OnUnitInactiveSec={'5min' if args.mode == 'laptop' else '2min'}
 AccuracySec=15s
 Unit={name}.service
 
@@ -85,7 +85,7 @@ WantedBy=timers.target
         semantic_arguments = ["semantic" if str(a) == "process" else a for a in arguments]
         semantic_service = service.replace('ExecStart=' + ' '.join(quoted(a) for a in arguments), 'ExecStart=' + ' '.join(quoted(a) for a in semantic_arguments)).replace("verified ingestion", "incremental semantic catch-up")
         (units / "conversation-web-semantic.service").write_text(semantic_service)
-        (units / "conversation-web-semantic.timer").write_text(timer.replace(name, "conversation-web-semantic").replace("OnStartupSec=2min", "OnStartupSec=10min").replace("OnUnitActiveSec=2min", "OnUnitActiveSec=30min"))
+        (units / "conversation-web-semantic.timer").write_text(timer.replace(name, "conversation-web-semantic").replace("OnStartupSec=2min", "OnStartupSec=10min").replace("OnUnitInactiveSec=2min", "OnUnitInactiveSec=30min"))
     subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
     if args.enable:
         subprocess.run(["systemctl", "--user", "enable", "--now", f"{name}.timer"], check=True)

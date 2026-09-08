@@ -127,6 +127,7 @@ def deliver(args):
     registry.migrate()
     state_path = root / f"delivery-state-{destination_id}.json"
     state = read(state_path, {"generations": {}})
+    save(root / "delivery-status.json", {"schema": "conversation-delivery-status/1", "checkedAt": now(), "status": "running", "destination": host, "stateFile": state_path.name})
     failures = []
     attempts = 0
     for generation in sorted((root / "outbox").glob("*"), key=lambda path: path.stat().st_mtime):
@@ -145,12 +146,16 @@ def deliver(args):
         attempts += 1
         try:
             if not entry.get("snapshotId"):
+                entry["status"] = "snapshotting"
+                save(state_path, state)
                 manifest = validate_generation(generation / "files")
                 capture_config = replace(config, provider_paths={"web-exports": (generation / "files",)})
                 captured = create_snapshot(capture_config, registry, machine)
                 entry.update({"snapshotId": captured.snapshot_id, "namespace": manifest["namespace"], "status": "queued", "bytes": sum(f["size"] for f in manifest["files"])})
                 save(state_path, state)
             if not entry.get("batchId"):
+                entry["status"] = "transferring"
+                save(state_path, state)
                 receipt = queue_snapshot(config, registry, host, entry["snapshotId"])
                 entry.update({**receipt, "sourceSnapshotId": entry["snapshotId"]})
                 save(state_path, state)
@@ -169,7 +174,7 @@ def deliver(args):
         save(state_path, state)
     entries = list(state["generations"].values())
     failures = [x for x in entries if x.get("error")]
-    summary = {"schema": "conversation-delivery-status/1", "checkedAt": now(), "status": "attention" if failures else "idle", "destination": host,
+    summary = {"schema": "conversation-delivery-status/1", "checkedAt": now(), "status": "attention" if failures else "idle", "destination": host, "stateFile": state_path.name,
                "queued": sum(not x.get("receivedAt") for x in entries), "queuedBytes": sum(x.get("bytes", 0) for x in entries if not x.get("receivedAt")),
                "received": sum(bool(x.get("receivedAt")) for x in entries), "imported": sum(x.get("imported") is True for x in entries),
                "indexed": sum(x.get("indexed") is True for x in entries), "semanticPending": sum(x.get("imported") is True and x.get("semantic") not in {"complete", "not-required"} for x in entries),
