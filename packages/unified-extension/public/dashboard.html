@@ -99,7 +99,8 @@
         <label>Bearer token<input id="vps-token" type="password" autocomplete="new-password"></label>
       </div>
       <div class="replication-footer">
-        <label class="check"><input id="native-enabled" type="checkbox"> Mirror to optional native host</label>
+        <label class="check"><input id="native-enabled" type="checkbox"> Queue local snapshots for SSH delivery</label>
+        <label>Account label <input id="account-label" value="personal" maxlength="128" aria-label="Archive account label"></label>
         <div class="actions"><button id="save-storage">Save storage settings</button><button id="sync-storage" class="secondary">Sync changed files</button></div>
       </div>
     </section>
@@ -112,6 +113,7 @@
         <div><span>3</span><h3>Keep a portable copy</h3><p>Download a ZIP, or configure replication to copy changed archive files to storage you control.</p></div>
       </div>
       <div class="faq-list">
+        <details><summary>How do I recover from a storage quota error?</summary><p>Click Repair storage to request persistent browser storage and verify a write. This never clears conversations. If blocked, keep the extension installed and replicate or download existing files before changing storage. A new build on disk does not update an already-running temporary extension: reload Conversation Archive at about:debugging#/runtime/this-firefox (Firefox/Zen) or chrome://extensions (Chrome), then refresh this dashboard and provider tabs.</p></details>
         <details><summary>What does AI Studio need before its first sync?</summary><p>After installing or reloading the extension, refresh AI Studio History and open one saved prompt once. This initializes the authenticated inventory and detail requests used by sync.</p></details>
         <details><summary>Where do credentials and conversations go?</summary><p>The extension uses your signed-in browser session but never reads or exports provider cookies, tokens, or passwords. VPS credentials remain in extension-local storage. Conversations stay in the browser archive unless you download them or enable a replication target.</p></details>
         <details><summary>What does a full sync include?</summary><p>Sync has no date cutoff. It discovers accessible histories and projects, downloads conversation or prompt bodies and referenced assets, and preserves previous records. Provider APIs may omit content or change behavior; deleted, temporary, expired or inaccessible content cannot be promised. Check the exported validation and sync reports for failures.</p></details>
@@ -125,6 +127,9 @@
   <aside class="activity-rail" data-state="idle" aria-live="polite" aria-label="Current activity">
     <div class="activity-rail__heading"><span>ACTIVITY</span><i aria-hidden="true"></i></div>
     <p id="status" data-state="idle">Ready.</p>
+    <p id="storage-health" class="small-note">Checking storage…</p>
+    <button id="repair-storage" class="quiet-button">Repair storage</button>
+    <p id="delivery-status" class="small-note">Checking delivery…</p>
     <p id="run-overview" class="small-note">No run recorded yet.</p>
     <div id="provider-progress"></div>
     <p id="scheduled-status">Checking automatic sync status…</p>

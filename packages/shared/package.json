@@ -17,7 +17,8 @@
     "./paths": "./src/paths.ts",
     "./provider": "./src/provider.ts",
     "./serialization": "./src/serialization.ts",
-    "./types": "./src/types.ts"
+    "./types": "./src/types.ts",
+    "./storage-health": "./src/storage-health.ts"
   },
   "scripts": {
     "check": "npm run typecheck && npm test",

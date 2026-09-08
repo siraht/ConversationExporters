@@ -14,10 +14,11 @@ import { syncManagedChatGpt, syncManagedGrok, type ManagedSyncDependencies } fro
 import { GrokExporterError } from "../../grok-exporter/src/core/errors";
 import { syncFilesystem, testVps } from "./vps";
 import { beginRun, finishRun, recoverRun, runHistory, updateProvider, type ProviderProgress } from "./run-store";
+import { requestPersistentArchive, storageEstimate } from "@conversation-exporters/shared/storage-health";
 
 type JsonRecord = Record<string, unknown>;
 const SETTINGS_KEY = "conversationExporters.unifiedStorage";
-const ARCHIVES: NativeArchiveNamespace[] = ["chatgpt-web", "claude-web", "gemini-web", "google-ai-studio", "grok-web"];
+const ARCHIVES: NativeArchiveNamespace[] = ["chatgpt-web", "claude-web", "gemini-web", "google-ai-studio", "grok-web", "run-history"];
 let active: Promise<unknown> | undefined;
 const cancellations = new Map<SyncProvider, () => void>();
 let cancelled = false;
@@ -25,8 +26,9 @@ const ACTIVE_SYNC_KEY = "conversationExporters.activeSync";
 const initialization = initializeBackground();
 
 async function initializeBackground(): Promise<void> {
-  await recoverRun();
-  await recoverInterruptedSync();
+  await requestPersistentArchive();
+  await recoverRun().catch(console.error);
+  await recoverInterruptedSync().catch(console.error);
   if (!await chrome.alarms.get("conversation-exporter-sync")) await chrome.alarms.create("conversation-exporter-sync", { periodInMinutes: 60 });
 }
 
@@ -74,6 +76,8 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
   if (value.type === "UNIFIED_SYNC_PROVIDER") { respond(runExclusive(async () => { const results = await trackedSync([value.provider as SyncProvider], "manual"); const result = results[String(value.provider)]!; if ("error" in result) throw new Error(result.error); return result; }), sendResponse); return true; }
   if (value.type === "UNIFIED_SYNC_ALL") { respond(runExclusive(() => trackedSync(["claude", "gemini", "ai-studio", "chatgpt", "grok"], "manual")), sendResponse); return true; }
   if (value.type === "UNIFIED_RUN_HISTORY") { respond(runHistory(Number(value.limit ?? 20), Number(value.offset ?? 0)), sendResponse); return true; }
+  if (value.type === "UNIFIED_STORAGE_HEALTH") { respond(checkStorage(value.repair === true), sendResponse); return true; }
+  if (value.type === "UNIFIED_DELIVERY_STATUS") { respond(deliveryStatus(), sendResponse); return true; }
   if (value.type === "UNIFIED_CANCEL_SYNC") { cancelled = true; for (const cancel of cancellations.values()) cancel(); sendResponse({ ok: true }); return false; }
   if (value.type === "UNIFIED_GET_SETTINGS") { respond(publicSettings(), sendResponse, "settings"); return true; }
   if (value.type === "UNIFIED_SAVE_SETTINGS") { respond(saveSettings(value.settings), sendResponse); return true; }
@@ -94,12 +98,13 @@ async function loadSettings(): Promise<StorageSettings> {
     vpsBaseUrl: String(value?.vpsBaseUrl ?? "").replace(/\/+$/, ""),
     vpsToken: String(value?.vpsToken ?? ""),
     nativeEnabled: value?.nativeEnabled === true,
+    accountLabel: String(value?.accountLabel ?? "personal"),
   };
 }
 
-async function publicSettings(): Promise<{ vpsEnabled: boolean; vpsBaseUrl: string; nativeEnabled: boolean; tokenConfigured: boolean }> {
+async function publicSettings(): Promise<{ vpsEnabled: boolean; vpsBaseUrl: string; nativeEnabled: boolean; tokenConfigured: boolean; accountLabel?: string }> {
   const settings = await loadSettings();
-  return { vpsEnabled: settings.vpsEnabled, vpsBaseUrl: settings.vpsBaseUrl, nativeEnabled: settings.nativeEnabled, tokenConfigured: Boolean(settings.vpsToken) };
+  return { vpsEnabled: settings.vpsEnabled, vpsBaseUrl: settings.vpsBaseUrl, nativeEnabled: settings.nativeEnabled, tokenConfigured: Boolean(settings.vpsToken), accountLabel: settings.accountLabel };
 }
 
 async function saveSettings(raw: unknown): Promise<void> {
@@ -110,7 +115,9 @@ async function saveSettings(raw: unknown): Promise<void> {
     vpsBaseUrl: String(candidate?.vpsBaseUrl ?? "").replace(/\/+$/, ""),
     vpsToken: String(candidate?.vpsToken || previous.vpsToken || ""),
     nativeEnabled: candidate?.nativeEnabled === true,
+    accountLabel: String(candidate?.accountLabel ?? previous.accountLabel ?? "personal"),
   };
+  if (!/^[a-zA-Z0-9._-]{1,128}$/.test(settings.accountLabel!)) throw new Error("Account label must use 1–128 letters, numbers, dots, underscores or hyphens");
   if (settings.vpsEnabled) await testVps({ enabled: true, baseUrl: settings.vpsBaseUrl, token: settings.vpsToken });
   await chrome.storage.local.set({ [SETTINGS_KEY]: settings });
 }
@@ -152,16 +159,31 @@ async function syncArchive(namespace: NativeArchiveNamespace): Promise<{ vpsFile
 
 async function mirrorToNative(namespace: NativeArchiveNamespace, browser: ArchiveFileSystem): Promise<{ changed: number; failed: number }> {
   const native = new NativeArchiveFileSystem(namespace);
-  const stateKey = `conversationExporters.nativeState.${namespace}`;
-  const state = ((await chrome.storage.local.get(stateKey))[stateKey] ?? {}) as Record<string, string>;
-  let changed = 0, failed = 0;
-  for (const path of await browser.listPaths()) {
-    const bytes = await browser.readBytes(path); if (!bytes) continue;
-    const hash = await sha256Hex(bytes); if (state[path] === hash) continue;
-    try { await native.writeBytesAtomic(path, bytes); state[path] = hash; changed += 1; await chrome.storage.local.set({ [stateKey]: state }); }
-    catch { failed += 1; }
-  }
-  return { changed, failed };
+  // Capture immutable Blob references in one readonly transaction, not live rereads.
+  const entries = await listBrowserArchiveEntries(namespace);
+  if (!entries.length) { native.close(); return { changed: 0, failed: 0 }; }
+  let changed = 0;
+  try {
+    const id = await native.beginGeneration();
+    const files: Array<{ path: string; sha256: string; size: number }> = [];
+    for (const entry of entries) {
+      const bytes = new Uint8Array(await entry.blob.arrayBuffer());
+      const file = { path: entry.path, sha256: await sha256Hex(bytes), size: bytes.byteLength };
+      if (!await native.reuseObject(file)) { await native.writeBytesAtomic(entry.path, bytes); changed += 1; }
+      files.push(file);
+    }
+    const settings = await loadSettings();
+    await native.writeTextAtomic("_generation.json", JSON.stringify({ schema: "conversation-export-generation/1", id, namespace, account: settings.accountLabel ?? "personal", createdAt: new Date().toISOString(), files }));
+    const receipt = await native.commitGeneration();
+    await chrome.storage.local.set({ [`conversationExporters.delivery.${namespace}`]: receipt });
+    return { changed, failed: 0 };
+  } finally { native.close(); }
+}
+
+async function deliveryStatus(): Promise<unknown> {
+  if (!(await loadSettings()).nativeEnabled) return { status: "disabled", message: "Enable local replication to queue exports for SSH delivery." };
+  const native = new NativeArchiveFileSystem("run-history");
+  try { return await native.deliveryStatus(); } finally { native.close(); }
 }
 
 async function chatGptRequest(tabId: unknown, raw: unknown): Promise<ApiResponse> {
@@ -179,6 +201,8 @@ async function grokRequest(message: RuntimeApiRequest): Promise<GrokApiResponse>
 
 async function trackedSync(providers: SyncProvider[], trigger: "manual" | "scheduled"): Promise<Record<string, SyncSummary | { error: string }>> {
   if (providers.some((provider) => !["claude", "gemini", "ai-studio", "chatgpt", "grok"].includes(provider))) throw new Error("Unknown provider");
+  const health = await checkStorage(false) as { writable: boolean; error?: string };
+  if (!health.writable) throw new Error(health.error ?? "Browser archive is not writable. Repair storage before syncing.");
   await beginRun(providers, trigger);
   const output: Record<string, SyncSummary | { error: string }> = {};
   try {
@@ -186,7 +210,10 @@ async function trackedSync(providers: SyncProvider[], trigger: "manual" | "sched
       if (cancelled) return;
       try { output[provider] = await syncProvider(provider); } catch (error) { output[provider] = { error: messageOf(error) }; }
     });
-  } finally { await finishRun(cancelled); }
+  } finally {
+    await finishRun(cancelled);
+    await syncArchive("run-history").catch(console.error);
+  }
   return output;
 }
 
@@ -231,7 +258,7 @@ async function syncProvider(provider: SyncProvider): Promise<SyncSummary> {
     updateProvider(provider, { status: cancelled ? "cancelled" : "failed", completedAt: new Date().toISOString(), message: messageOf(error) });
     await progressWrites;
     await chrome.storage.local.set({ [ACTIVE_SYNC_KEY]: { provider, status: "failed", startedAt, completedAt: new Date().toISOString(), error: messageOf(error) } });
-    await writeJson(filesystem, "validation.json", { schemaVersion: 2, provider, valid: false, status: "failed", error: messageOf(error), checkedAt: new Date().toISOString() });
+    await writeJson(filesystem, "validation.json", { schemaVersion: 2, provider, valid: false, status: "failed", error: messageOf(error), checkedAt: new Date().toISOString() }).catch(() => undefined);
     await filesystem.writeTextAtomic("sync-report.json", JSON.stringify({ schemaVersion: 1, provider, status: "failed", completedAt: new Date().toISOString(), error: messageOf(error) })).catch(() => undefined);
     throw error;
   } finally { cancellations.delete(provider); }
@@ -557,7 +584,22 @@ export async function preserveTruncatedAttempt(filesystem: ArchiveFileSystem, ro
   await writeJson(filesystem, `${root}/truncated-attempt.json`, record);
   throw new Error("Gemini detail reached the provider turn limit. Partial response retained separately; any previous conversation is preserved.");
 }
-function messageOf(error: unknown): string { return error instanceof Error ? error.message : "Operation failed"; }
+function messageOf(error: unknown): string {
+  const message = error instanceof Error ? error.message : "Operation failed";
+  return /Claude.*(?:401|403)/i.test(message) ? `${message}. Claude denied access. Refresh claude.ai, confirm the intended account and organization can open its history, then retry Claude. A 403 can also be a provider security block; retries cannot grant access.` : message;
+}
+
+async function checkStorage(repair: boolean): Promise<unknown> {
+  if (repair) await requestPersistentArchive();
+  const health = await storageEstimate();
+  const archive = new IndexedDbArchiveFileSystem("storage-health");
+  const path = `probe-${crypto.randomUUID()}.txt`;
+  try {
+    await archive.writeTextAtomic(path, "Storage write verification");
+    await archive.remove(path);
+    return { ...health, writable: true, version: chrome.runtime.getManifest().version };
+  } catch (error) { return { ...health, writable: false, error: messageOf(error), version: chrome.runtime.getManifest().version }; }
+}
 
 interface ClaudeFileReference extends JsonRecord { name: string; fileUuid?: string; sandboxPath?: string; previewUrl?: string }
 

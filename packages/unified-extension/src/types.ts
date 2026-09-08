@@ -16,6 +16,7 @@ export interface StorageSettings {
   vpsBaseUrl: string;
   vpsToken: string;
   nativeEnabled: boolean;
+  accountLabel?: string;
 }
 
 export const DEFAULT_STORAGE_SETTINGS: StorageSettings = {

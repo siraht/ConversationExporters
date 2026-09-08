@@ -1,4 +1,5 @@
 import { listBrowserArchiveEntries } from "@conversation-exporters/shared/indexeddb-filesystem";
+import { requestPersistentArchive, type StorageHealth } from "@conversation-exporters/shared/storage-health";
 import { zipSync } from "fflate";
 import { summarizeBrowserArchives, type ArchiveSummary } from "./archive-summary";
 import { initializeObservability, refreshCoverage } from "./observability-ui";
@@ -29,14 +30,41 @@ initializeObservability((running, message, error) => {
   if (!running) void refreshArchive();
 });
 void initialize();
+document.getElementById("repair-storage")?.addEventListener("click", () => void refreshStorageHealth(true));
+void refreshStorageHealth(false);
+setInterval(() => void refreshStorageHealth(false), 60_000);
+
+async function refreshStorageHealth(repair: boolean): Promise<void> {
+  const element = document.getElementById("storage-health");
+  if (!element) return;
+  try {
+    if (repair) await requestPersistentArchive();
+    const response = await chrome.runtime.sendMessage({ type: "UNIFIED_STORAGE_HEALTH", repair }) as { ok: boolean; result?: StorageHealth & { version: string }; error?: string };
+    if (!response.ok || !response.result) throw new Error(response.error ?? "Storage check unavailable; reload the extension, then this dashboard.");
+    const h = response.result;
+    const gib = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(2)} GiB`;
+    element.textContent = `Extension ${h.version} · ${h.writable ? "Storage writable" : "Storage blocked"} · ${h.persisted ? "Persistent" : "Best-effort"}${h.usage !== undefined ? ` · ${gib(h.usage)} used` : ""}${h.quota !== undefined ? ` / ${gib(h.quota)} browser quota` : ""}${h.error ? `. ${h.error}` : ""}`;
+    if (!h.writable) setStatus(h.error ?? "Browser archive storage is blocked", "error");
+  } catch (error) { element.textContent = messageOf(error); }
+  const delivery = document.getElementById("delivery-status");
+  if (delivery) {
+    try {
+      const response = await chrome.runtime.sendMessage({ type: "UNIFIED_DELIVERY_STATUS" });
+      if (!response.ok) throw new Error(response.error);
+      const d = response.result;
+      delivery.textContent = d.message ?? `VPS delivery: ${d.queued ?? 0} queued (${((d.queuedBytes ?? 0) / 1024 ** 2).toFixed(1)} MiB), ${d.received ?? 0} received, ${d.imported ?? 0} imported, ${d.indexed ?? 0} searchable, ${d.semanticPending ?? 0} awaiting semantic indexing. ${d.failed ? `${d.failed} need attention.` : ""}`;
+    } catch (error) { delivery.textContent = `Delivery: ${messageOf(error)}`; }
+  }
+}
 
 async function initialize(): Promise<void> {
   grantedOrigins = new Set((await chrome.permissions.getAll()).origins ?? []);
-  const response = await chrome.runtime.sendMessage({ type: "UNIFIED_GET_SETTINGS" }) as { ok: boolean; settings?: { vpsEnabled: boolean; vpsBaseUrl: string; nativeEnabled: boolean; tokenConfigured: boolean } };
+  const response = await chrome.runtime.sendMessage({ type: "UNIFIED_GET_SETTINGS" }) as { ok: boolean; settings?: { vpsEnabled: boolean; vpsBaseUrl: string; nativeEnabled: boolean; tokenConfigured: boolean; accountLabel?: string } };
   if (response.ok && response.settings) {
     vpsEnabled.checked = response.settings.vpsEnabled;
     vpsUrl.value = response.settings.vpsBaseUrl;
     nativeEnabled.checked = response.settings.nativeEnabled;
+    required<HTMLInputElement>("account-label").value = response.settings.accountLabel ?? "personal";
     vpsToken.placeholder = response.settings.tokenConfigured ? "Token retained; enter a value only to replace it" : "Bearer token (20+ characters)";
   }
   await refresh();
@@ -128,7 +156,7 @@ async function saveStorage(): Promise<void> {
     if (nativeEnabled.checked) requested.permissions = ["nativeMessaging"];
     if ((requested.origins?.length || requested.permissions?.length || requested.data_collection?.length)
       && !await chrome.permissions.request(requested)) throw new Error("The requested replication permission was not granted");
-    const response = await chrome.runtime.sendMessage({ type: "UNIFIED_SAVE_SETTINGS", settings: { vpsEnabled: vpsEnabled.checked, vpsBaseUrl: vpsUrl.value, vpsToken: vpsToken.value, nativeEnabled: nativeEnabled.checked } }) as { ok: boolean; error?: string };
+    const response = await chrome.runtime.sendMessage({ type: "UNIFIED_SAVE_SETTINGS", settings: { vpsEnabled: vpsEnabled.checked, vpsBaseUrl: vpsUrl.value, vpsToken: vpsToken.value, nativeEnabled: nativeEnabled.checked, accountLabel: required<HTMLInputElement>("account-label").value } }) as { ok: boolean; error?: string };
     if (!response.ok) throw new Error(response.error ?? "Could not save storage settings");
     vpsToken.value = ""; setStatus("Storage settings saved. Secrets remain in extension-local storage.", "complete");
   } catch (error) { setStatus(messageOf(error), "error"); }

@@ -1,5 +1,6 @@
 import type { ArchiveFileSystem } from "./filesystem";
 import { assertSafeRelativePath } from "./paths";
+import { archiveStorageError, isQuotaError, requestPersistentArchive } from "./storage-health";
 
 const DATABASE = "conversation-exporters-archives";
 const STORE = "files";
@@ -35,7 +36,18 @@ export class IndexedDbArchiveFileSystem implements ArchiveFileSystem {
   }
   async remove(path: string): Promise<void> { await transact<void>("readwrite", (store, resolve, reject) => { const request = store.delete(this.key(path)); request.onsuccess = () => resolve(); request.onerror = () => reject(request.error!); }); }
   async ready(): Promise<void> { await this.listPaths(); }
-  private async put(path: string, bytes: Blob): Promise<void> { const key = this.key(path); await transact<void>("readwrite", (store, resolve, reject) => { const request = store.put({ key, bytes } satisfies StoredFile); request.onsuccess = () => resolve(); request.onerror = () => reject(request.error!); }); }
+  private async put(path: string, bytes: Blob): Promise<void> {
+    const key = this.key(path);
+    const write = () => transact<void>("readwrite", (store, resolve, reject) => { const request = store.put({ key, bytes } satisfies StoredFile); request.onsuccess = () => resolve(); request.onerror = () => reject(request.error!); });
+    try { await write(); }
+    catch (error) {
+      // One retry after persistence promotion; never delete data to make room.
+      if (isQuotaError(error) && await requestPersistentArchive()) {
+        try { await write(); return; } catch (retryError) { throw archiveStorageError(retryError); }
+      }
+      throw archiveStorageError(error);
+    }
+  }
   private async blob(path: string): Promise<Blob | undefined> { const value = await transact<StoredFile | undefined>("readonly", (store, resolve, reject) => { const request = store.get(this.key(path)); request.onsuccess = () => resolve(request.result as StoredFile | undefined); request.onerror = () => reject(request.error!); }); return value?.bytes; }
   private key(path: string, allowEmpty = false): string {
     if (path) assertSafeRelativePath(path); else if (!allowEmpty) throw new Error("Archive path is empty");

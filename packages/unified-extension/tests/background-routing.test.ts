@@ -29,7 +29,7 @@ let listener: (message: unknown, sender: chrome.runtime.MessageSender, response:
 beforeAll(async () => {
   vi.stubGlobal("chrome", {
     action: { onClicked: { addListener: vi.fn() } },
-    runtime: { id: "test", getURL: () => "moz-extension://test/", onInstalled: { addListener: vi.fn() },
+    runtime: { id: "test", getManifest: () => ({ version: "0.6.0" }), getURL: () => "moz-extension://test/", onInstalled: { addListener: vi.fn() },
       onMessage: { addListener: (value: typeof listener) => { listener = value; } }, sendMessage: vi.fn(), getPlatformInfo: vi.fn(async () => ({})) },
     alarms: { onAlarm: { addListener: vi.fn() }, get: vi.fn(async () => undefined), create: vi.fn(async () => undefined) },
     storage: { local: { get: vi.fn(async () => ({ ...state.storage })), set: vi.fn(async (values) => { Object.assign(state.storage, values); }) } },

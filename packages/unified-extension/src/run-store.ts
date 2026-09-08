@@ -34,8 +34,9 @@ function persist(): Promise<void> {
   if (!current) return pending;
   const snapshot = structuredClone(current);
   pending = pending.catch(() => undefined).then(async () => {
-    await archive.writeTextAtomic(`${snapshot.startedAt.replace(/:/g, "-")}-${snapshot.runId}.json`, JSON.stringify(snapshot));
     await chrome.storage.local.set({ [RUN_PROGRESS_KEY]: snapshot });
+    // A full archive must not prevent the dashboard from showing the failure.
+    await archive.writeTextAtomic(`${snapshot.startedAt.replace(/:/g, "-")}-${snapshot.runId}.json`, JSON.stringify(snapshot)).catch((error) => console.error("Run history could not be archived", error));
     const running = Object.values(snapshot.providers).filter((state) => state.status === "running").length;
     const attention = snapshot.status !== "running" && snapshot.status !== "complete";
     await chrome.action.setBadgeText?.({ text: snapshot.status === "running" ? String(running) : attention ? "!" : "" });
