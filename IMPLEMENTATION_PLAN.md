@@ -1,5 +1,7 @@
 # ConversationExporters consolidation plan
 
+Current follow-on work: [VPS delivery tracker](VPS_INGESTION_PLAN.html) and [completeness tracker](COMPLETENESS.html). Version 0.6.0 adds quota recovery and committed-snapshot SSH delivery. Live quota recovery and current provider access remain user-run acceptance gates; earlier completion claims below describe historical checkpoints.
+
 Status: consolidation complete; account-wide completeness acceptance remains pending.
 
 The September 2026 completeness audit, corrections, commit timeline, limitations and manual acceptance checklist are tracked in [COMPLETENESS.html](COMPLETENESS.html). Earlier successful counts in this historical plan refer to discovered records, not proof that every provider conversation was discovered.

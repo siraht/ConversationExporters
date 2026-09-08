@@ -67,7 +67,7 @@ archive.example.com {
 }
 ```
 
-Enter `https://archive.example.com` and the token in the extension, enable VPS replication, and save. Saving performs an authenticated status request, and **Sync changed files now** uploads only content whose local SHA-256 changed. The server can run on any Linux VPS, home server, NAS, container host, or machine reachable through Tailscale; only Node, a writable directory, and HTTPS termination are assumed.
+Enter `https://archive.example.com` and the token in the extension, enable VPS replication, and save. Saving performs an authenticated status request. **Sync changed files** verifies remote hashes before skipping unchanged files, and uploads changed or missing content. The server can run on any Linux VPS, home server, NAS, container host, or machine reachable through Tailscale; only Node, a writable directory, and HTTPS termination are assumed.
 
 rclone remains useful as a second backup layer because the receiver produces ordinary files:
 
@@ -84,18 +84,66 @@ npm run build:sync
 npm run install:native
 ```
 
-That installs the Firefox/Zen native manifest and writes to `${CONVERSATION_SYNC_ROOT:-$HOME/ConversationImports}/live`. For Chrome, first copy the 32-character extension ID shown on `chrome://extensions`, then reinstall:
+That installs the Firefox/Zen native manifest, including the unified extension ID. Unified exports become hash-verified snapshots under `${CONVERSATION_SYNC_ROOT:-$HOME/ConversationImports}/outbox`; unchanged objects are reused. Standalone exporters retain their `live` directories. For Chrome, first copy the 32-character extension ID shown on `chrome://extensions`, then reinstall:
 
 ```sh
 CONVERSATION_CHROME_EXTENSION_ID=abcdefghijklmnopabcdefghijklmnop npm run install:native
 ```
 
-The installer supports Google Chrome, Chromium, and Brave's standard per-user native-host directories. rclone and the older SSH/ASM reconciliation pipeline remain in `packages/sync-runner`, but their Flywheel defaults are legacy personal configuration rather than requirements of the extension or VPS receiver.
+The installer supports Google Chrome, Chromium, and Brave's standard per-user native-host directories. rclone remains a fallback. The old `once --push` / `watch --push` route is disabled because it duplicated local imports and bypassed the VPS indexing worker.
+
+### Automatic SSH delivery to ASM and CASS
+
+The laptop initiates every connection. Requirements: Python 3.11+, a compatible installed ASM runtime, SSH and rsync on both machines, and systemd for timers. No local CASS index or public HTTP endpoint is required.
+
+On the VPS, copy `archive-delivery.py` and `install-delivery.py` from `packages/sync-runner/scripts` to a private tools directory. Run:
+
+```sh
+python3 install-delivery.py vps \
+  --runtime-src /path/to/asm/src \
+  --archive-root /path/to/authoritative-archive --enable
+```
+
+The runtime path must contain the `agent_session_archive` package. The installer prints the final helper path. On the laptop, use that path and your SSH alias:
+
+```sh
+npm run build:sync
+npm run install:native
+python3 packages/sync-runner/scripts/install-delivery.py laptop \
+  --runtime-src /path/to/asm/src \
+  --destination my-vps \
+  --archive-root /path/to/authoritative-archive \
+  --remote-helper /home/myuser/.local/lib/conversation-exporters/archive-delivery.py \
+  --enable
+```
+
+Enable **Queue local snapshots for SSH delivery**, save, and approve native messaging. **Sync changed files** queues existing browser archives without fetching providers again. Subsequent provider syncs queue automatically. Keep the account label stable for one login; use a different label before exporting an unrelated account.
+
+The laptop checks every five minutes while awake; VPS ingestion checks every two minutes and semantic catch-up every thirty minutes. VPS user lingering is needed after logout (`loginctl enable-linger USER`, where permitted). Workers share ASM's refresh lock; `--pause-unit maintenance.service` defers work during an existing repair. The laptop service is capped at one CPU/2 GiB, and VPS workers at two CPUs/16 GiB. Verify your host supports user-cgroup limits. Native writes retain 2 GiB free by default (`CONVERSATION_MIN_FREE_BYTES` in the host environment); the server respects ASM's configured disk policy. Originals are never automatically deleted.
+
+The sidebar separates queued, received, imported, searchable and semantic-pending counts. A raw receipt does not mean indexing succeeded. Failed imports retry without another upload. AI Studio's opaque web payloads remain preserved and searchable, with role/branch decoding limitations explicitly recorded.
+
+```sh
+# Laptop
+systemctl --user status conversation-delivery.timer
+journalctl --user -u conversation-delivery.service -n 20
+# VPS
+systemctl --user status conversation-web-ingest.timer conversation-web-semantic.timer
+journalctl --user -u conversation-web-ingest.service -n 20
+```
+
+See [the delivery tracker](VPS_INGESTION_PLAN.html) for deployed status and live acceptance. Synthetic integration tests: `ASM_RUNTIME_SRC=/path/to/asm/src python3 packages/sync-runner/tests/test_delivery.py`.
+
+### Browser quota recovery
+
+Version 0.6.0 requests persistent storage and checks a write before fetching providers. The sidebar shows the loaded version, estimated usage/quota and persistence. **Repair storage** retries persistence and the write check without deleting conversations. `unlimitedStorage` can still encounter browser-wide limits ([Mozilla documentation](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/storage/local)).
+
+Building files does not update a running temporary extension. Reload Conversation Archive at `about:debugging#/runtime/this-firefox` (Firefox/Zen) or `chrome://extensions` (Chrome), then refresh the dashboard and provider tabs. **Do not remove the extension or clear its data.** If storage stays blocked, replicate the existing archive and report the storage figures. Claude 401/403 errors are separate: confirm account/organization access and resolve any provider challenge before retrying.
 
 ## Publish to the Chrome Web Store
 
 1. Register and finish a [Chrome Web Store developer account](https://developer.chrome.com/docs/webstore/set-up-account), including email verification and two-step verification.
-2. Run the build and package commands above. Upload `packages/unified-extension/dist/releases/conversation-archive-chrome-0.5.0.zip` as a new item in the [Developer Dashboard](https://chrome.google.com/webstore/devconsole). The ZIP has `manifest.json` at its root and includes 16, 32, 48, and 128 pixel PNG icons.
+2. Run the build and package commands above. Upload `packages/unified-extension/dist/releases/conversation-archive-chrome-0.6.0.zip` as a new item in the [Developer Dashboard](https://chrome.google.com/webstore/devconsole). The ZIP has `manifest.json` at its root and includes 16, 32, 48, and 128 pixel PNG icons.
 3. Use `store-screenshot-1280x800.png`, `store-promo-440x280.png`, and the generated `icon-128.png` from `packages/unified-extension/dist/releases` for the listing. Chrome currently requires at least a 1280×800 screenshot and a 440×280 small promotional image.
 4. Set the single purpose to: “Create private, portable archives of the user's conversations from supported AI chat websites and copy them only to storage destinations the user chooses.” In the Privacy tab, disclose **personal communications** and **website content**; state that data is stored locally by default, that optional VPS transmission goes only to the exact user-supplied HTTPS origin, and that the developer receives no data.
 5. Use this README's **Privacy policy** section as the privacy-policy URL after the repository is public. For reviewer instructions, say to install the extension, sign in to any supported provider in a normal tab, refresh that tab, open the extension dashboard, and run that provider's sync. Explain that VPS and native replication are optional.
@@ -107,8 +155,8 @@ Chrome requires a new, higher manifest version for every update. Do not upload p
 
 1. Run `npx web-ext lint --source-dir packages/unified-extension/dist/firefox`; the release is expected to report zero errors, warnings, and notices.
 2. Log in to the [AMO Developer Hub](https://addons.mozilla.org/developers/), choose **Submit a New Add-on**, and choose either **On this site** for a public AMO listing or **On your own** for Mozilla signing without a listing.
-3. Upload `packages/unified-extension/dist/releases/conversation-archive-firefox-0.5.0.zip`. Manifest V3 signing uses the stable Firefox ID already in the manifest. The manifest declares no transmission by default and requests Firefox's optional personal-communications and website-content consent only when the user enables VPS replication.
-4. Because the release JavaScript is bundled from TypeScript, upload `packages/unified-extension/dist/releases/conversation-archive-source-0.5.0.zip` when AMO asks for generated-source material. A clean checkout plus `npm ci && npm run build:unified` is the reproducible build procedure; the source packager runs the privacy gate and excludes ignored build output, private exports, and browser profiles.
+3. Upload `packages/unified-extension/dist/releases/conversation-archive-firefox-0.6.0.zip`. Manifest V3 signing uses the stable Firefox ID already in the manifest. The manifest declares no transmission by default and requests Firefox's optional personal-communications and website-content consent when the user enables VPS or native replication.
+4. Because the release JavaScript is bundled from TypeScript, upload `packages/unified-extension/dist/releases/conversation-archive-source-0.6.0.zip` when AMO asks for generated-source material. A clean checkout plus `npm ci && npm run build:unified` is the reproducible build procedure; the source packager runs the privacy gate and excludes ignored build output, private exports, and browser profiles.
 5. Fill in the listing, privacy-policy URL, support address, categories, and reviewer notes, then submit. Mozilla's current [submission guide](https://extensionworkshop.com/documentation/publish/submitting-an-add-on/) covers both listed and self-distributed signing. Download the signed XPI from AMO; that signed XPI, rather than the unsigned source ZIP, is the permanent Firefox/Zen install.
 
 ## Suggested store copy
