@@ -1,7 +1,7 @@
 import { readdir, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fingerprintPath } from "./hash.js";
-import { importWithAsm, pushWithAsm, replicateWebSources } from "./asm.js";
+import { importWithAsm } from "./asm.js";
 import { loadState, saveState, withLock } from "./state.js";
 import type { ImportResult, Provider, SyncConfig, SyncSummary } from "./types.js";
 
@@ -11,6 +11,7 @@ export interface SyncOptions {
 }
 
 export async function syncOnce(config: SyncConfig, options: SyncOptions): Promise<SyncSummary> {
+  if (options.push) throw new Error("Legacy --push is disabled: it duplicated local imports and bypassed the VPS ingestion worker. Use archive-delivery.py deliver (or the conversation-delivery timer) for committed browser exports.");
   return await withLock(config.dataRoot, async () => {
     const statePath = join(config.dataRoot, "state.json");
     const state = await loadState(statePath);
@@ -44,24 +45,7 @@ export async function syncOnce(config: SyncConfig, options: SyncOptions): Promis
       await saveState(statePath, state);
     }
 
-    let pushed = false;
-    let pushObjects = 0;
-    let pushBytes = 0;
-    let mirroredSources = 0;
-    let remoteNewVersions = 0;
-    let remoteIndexed = false;
-    if (options.push) {
-      const mirror = await replicateWebSources(config, results);
-      mirroredSources = mirror.mirroredSources;
-      remoteNewVersions = mirror.remoteNewVersions;
-      remoteIndexed = mirror.remoteIndexed;
-      const push = await pushWithAsm(config);
-      pushed = true;
-      pushObjects = push.objects;
-      pushBytes = push.bytes;
-    }
-
-    return summarize(results, { pushed, pushObjects, pushBytes, mirroredSources, remoteNewVersions, remoteIndexed });
+    return summarize(results, { pushed: false, pushObjects: 0, pushBytes: 0, mirroredSources: 0, remoteNewVersions: 0, remoteIndexed: false });
   });
 }
 

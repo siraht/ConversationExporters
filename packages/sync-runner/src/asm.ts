@@ -1,7 +1,4 @@
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
-import { stat } from "node:fs/promises";
-import { dirname, extname, join, relative, resolve } from "node:path";
 import type { ImportResult, Provider, SyncConfig } from "./types.js";
 
 interface CommandResult {
@@ -47,98 +44,6 @@ export async function importWithAsm(
   };
 }
 
-export async function pushWithAsm(config: SyncConfig): Promise<{ objects: number; bytes: number }> {
-  const command = await run(config.asmBinary, [
-    "--root", config.archiveRoot,
-    "push", config.destination,
-    "--json",
-  ]);
-  const envelope = parseEnvelope(command.stdout || command.stderr);
-  if (command.exitCode !== 0 || envelope.ok !== true || !envelope.result) {
-    const code = typeof envelope.error?.code === "string" ? envelope.error.code : "asm_push_failed";
-    throw new Error(`archive push failed (${code})`);
-  }
-  return {
-    objects: numberValue(envelope.result.objects),
-    bytes: numberValue(envelope.result.bytes),
-  };
-}
-
-export async function replicateWebSources(
-  config: SyncConfig,
-  sources: Array<Pick<ImportResult, "source" | "provider">>,
-): Promise<{ mirroredSources: number; remoteNewVersions: number; remoteIndexed: boolean }> {
-  const liveRoot = resolve(config.dataRoot, "live");
-  const incomingRoot = resolve(config.dataRoot, "incoming");
-  const eligible: Array<{ source: string; provider: Provider; relativePath: string }> = [];
-  for (const item of sources) {
-    const source = resolve(item.source);
-    const relativePath = safeRelativePath(relative(config.dataRoot, source).replaceAll("\\", "/"));
-    const isPrivateSource = source.startsWith(`${liveRoot}/`) || source.startsWith(`${incomingRoot}/`);
-    if (item.provider && isPrivateSource) eligible.push({ source, provider: item.provider, relativePath });
-  }
-  if (!eligible.length) return { mirroredSources: 0, remoteNewVersions: 0, remoteIndexed: false };
-  safeRemote(config.destination, "destination");
-  safeRemote(config.remoteMirrorRoot, "remote mirror root", true);
-  safeRemote(config.remoteArchiveRoot, "remote archive root", true);
-  safeRemote(config.remoteAsmBinary, "remote ASM command", true);
-  safeRemote(config.accountLabel, "account label");
-
-  let mirroredSources = 0;
-  let remoteNewVersions = 0;
-  for (const item of eligible) {
-    safeRemote(item.relativePath, "relative source path", true);
-    const remoteSource = join(config.remoteMirrorRoot, item.relativePath).replaceAll("\\", "/");
-    const privateDirectories = [...new Set([dirname(config.remoteMirrorRoot), config.remoteMirrorRoot, dirname(remoteSource)])];
-    const mkdirResult = await run(config.sshBinary, ["--", config.destination, "mkdir", "-p", "--", ...privateDirectories]);
-    if (mkdirResult.exitCode !== 0) throw new Error("web mirror directory creation failed");
-    const chmodResult = await run(config.sshBinary, ["--", config.destination, "chmod", "700", "--", ...privateDirectories]);
-    if (chmodResult.exitCode !== 0) throw new Error("web mirror privacy setup failed");
-    const metadata = await stat(item.source);
-    const localArgument = metadata.isDirectory() ? `${item.source}/` : item.source;
-    const remoteArgument = `${config.destination}:${metadata.isDirectory() ? `${remoteSource}/` : remoteSource}`;
-    const copy = await run(config.rsyncBinary, [
-      "--archive", "--protect-args", "--partial", "--compress", "--compress-choice=zstd",
-      "--itemize-changes", "--out-format=%i",
-      "--chmod=F600,D700", "--", localArgument, remoteArgument,
-    ]);
-    if (copy.exitCode !== 0) throw new Error("web mirror transfer failed");
-    if (!copy.stdout.trim()) continue;
-    const imported = await run(config.sshBinary, [
-      "--", config.destination, config.remoteAsmBinary, "--root", config.remoteArchiveRoot,
-      "web-import", remoteSource, "--account-label", config.accountLabel, "--provider", item.provider, "--json",
-    ]);
-    const envelope = parseEnvelope(imported.stdout || imported.stderr);
-    if (imported.exitCode !== 0 || envelope.ok !== true || !envelope.result) {
-      const code = typeof envelope.error?.code === "string" ? envelope.error.code : "remote_web_import_failed";
-      throw new Error(`remote web import failed (${code})`);
-    }
-    mirroredSources += 1;
-    remoteNewVersions += numberValue(envelope.result.new_versions);
-  }
-  let remoteIndexed = false;
-  if (remoteNewVersions > 0) {
-    const indexed = await run(config.sshBinary, [
-      "--", config.destination, config.remoteAsmBinary, "--root", config.remoteArchiveRoot, "index", "--json",
-    ]);
-    const envelope = parseEnvelope(indexed.stdout || indexed.stderr);
-    if (indexed.exitCode !== 0 || envelope.ok !== true) throw new Error("remote conversation index failed");
-    remoteIndexed = true;
-  }
-  return { mirroredSources, remoteNewVersions, remoteIndexed };
-}
-
-function safeRelativePath(value: string): string {
-  if (/^[A-Za-z0-9._/-]+$/.test(value)) return value;
-  const parts = value.split("/");
-  const filename = parts.pop() ?? "source";
-  const extension = extname(filename).replace(/[^A-Za-z0-9.]/g, "");
-  const stem = filename.slice(0, filename.length - extension.length).replace(/[^A-Za-z0-9._-]/g, "_");
-  const digest = createHash("sha256").update(value).digest("hex").slice(0, 12);
-  const directories = parts.map((part) => part.replace(/[^A-Za-z0-9._-]/g, "_"));
-  return [...directories, `${stem}-${digest}${extension}`].join("/");
-}
-
 async function run(command: string, arguments_: string[]): Promise<CommandResult> {
   return await new Promise((resolve, reject) => {
     const child = spawn(command, arguments_, { stdio: ["ignore", "pipe", "pipe"] });
@@ -149,11 +54,6 @@ async function run(command: string, arguments_: string[]): Promise<CommandResult
     child.on("error", reject);
     child.on("close", (exitCode) => resolve({ exitCode: exitCode ?? 1, stdout, stderr }));
   });
-}
-
-function safeRemote(value: string, name: string, allowSlash = false): void {
-  const pattern = allowSlash ? /^[A-Za-z0-9._/-]+$/ : /^[A-Za-z0-9._-]+$/;
-  if (!pattern.test(value) || value.split("/").includes("..")) throw new Error(`${name} is unsafe`);
 }
 
 function parseEnvelope(value: string): AsmEnvelope {

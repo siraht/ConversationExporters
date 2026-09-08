@@ -36,38 +36,27 @@ describe("syncOnce", () => {
     expect(JSON.stringify(first)).not.toContain("private-conversation-id");
   });
 
-  it("pushes through the archive protocol when requested", async () => {
+  it("explains the supported delivery replacement for legacy push", async () => {
     const fixture = await setup();
     await writeFile(join(fixture.dataRoot, "incoming", "claude.zip"), "revision-one");
-    const result = await syncOnce(fixture.config, { push: true });
-    expect(result).toMatchObject({ pushed: true, pushObjects: 4, pushBytes: 2048 });
+    await expect(syncOnce(fixture.config, { push: true })).rejects.toThrow("conversation-delivery timer");
   });
 
-  it("mirrors changed live sources without deletion and imports them remotely before native push", async () => {
+  it("rejects the legacy inline-indexing push before performing imports", async () => {
     const fixture = await setup();
     const source = join(fixture.dataRoot, "live", "claude-web");
     await mkdir(source, { recursive: true });
     await writeFile(join(source, "conversations.json"), "[]");
-    const result = await syncOnce(fixture.config, { push: true });
-    expect(result).toMatchObject({ mirroredSources: 1, remoteNewVersions: 2, remoteIndexed: true, pushed: true });
-    const rsync = await readFile(fixture.rsyncCalls, "utf8");
-    expect(rsync).toContain("--archive --protect-args --partial --compress --compress-choice=zstd --itemize-changes");
-    expect(rsync).not.toContain("--delete");
-    const ssh = await readFile(fixture.sshCalls, "utf8");
-    expect(ssh).toContain("chmod 700 -- /data/agent-session-archive/web-mirror");
-    expect(ssh).toContain("web-import /data/agent-session-archive/web-mirror/laptop/live/claude-web");
-    expect(ssh).toContain("--root /data/agent-session-archive");
-    expect(ssh).toContain("index --json");
+    await expect(syncOnce(fixture.config, { push: true })).rejects.toThrow("Legacy --push is disabled");
+    await expect(readFile(fixture.calls, "utf8")).rejects.toThrow();
   });
 
-  it("mirrors supported incoming exports so one-time provider history reaches Flywheel", async () => {
+  it("also rejects legacy ZIP push before changing local or remote archives", async () => {
     const fixture = await setup();
     const source = join(fixture.dataRoot, "incoming", "Claude Export.zip");
     await writeFile(source, "revision-one");
-    const result = await syncOnce(fixture.config, { push: true });
-    expect(result).toMatchObject({ mirroredSources: 1, remoteNewVersions: 2, remoteIndexed: true });
-    const ssh = await readFile(fixture.sshCalls, "utf8");
-    expect(ssh).toMatch(/web-import \/data\/agent-session-archive\/web-mirror\/laptop\/incoming\/Claude_Export-[a-f0-9]{12}\.zip/);
+    await expect(syncOnce(fixture.config, { push: true })).rejects.toThrow("Legacy --push is disabled");
+    await expect(readFile(fixture.sshCalls, "utf8")).rejects.toThrow();
   });
 });
 
